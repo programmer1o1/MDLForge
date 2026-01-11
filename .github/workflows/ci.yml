@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure and build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.ci/build.ps1 -Configuration Release -BuildDir build
+
+      - name: Configure and build (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          chmod +x ./.ci/build.sh
+          ./.ci/build.sh build Release
+
+      - name: Configure and build (macOS x86_64)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          EXTRA_CMAKE_ARGS: "-DCMAKE_OSX_ARCHITECTURES=x86_64"
+        run: |
+          chmod +x ./.ci/build.sh
+          ./.ci/build.sh build Release

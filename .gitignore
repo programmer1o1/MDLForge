@@ -1,0 +1,41 @@
+# Build output
+/build*/
+/out*/
+/cmake-build*/
+/CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+
+# CMake presets/user files
+CMakeUserPresets.json
+CMakePresets.json.user
+
+# Visual Studio / VS Code
+/.vs/
+*.sln
+*.vcxproj*
+*.filters
+*.user
+*.suo
+*.ncb
+
+# Compiled artifacts
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.exe
+*.dll
+
+# Unix/macOS compiled artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dSYM/
+
+# OS junk
+.DS_Store
+Thumbs.db
