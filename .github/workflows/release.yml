@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }} ${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            arch: x86
+          - os: ubuntu-latest
+            platform: linux
+            arch: x86_64
+          - os: macos-latest
+            platform: macos
+            arch: x86_64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure and build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.ci/build.ps1 -Configuration Release -BuildDir build
+
+      - name: Configure and build (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          chmod +x ./.ci/build.sh
+          ./.ci/build.sh build Release
+
+      - name: Configure and build (macOS x86_64)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          EXTRA_CMAKE_ARGS: "-DCMAKE_OSX_ARCHITECTURES=x86_64"
+        run: |
+          chmod +x ./.ci/build.sh
+          ./.ci/build.sh build Release
+
+      - name: Install (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake --install build --config Release --prefix dist
+
+      - name: Install (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cmake --install build --config Release --prefix dist
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $name = "MDLForge-$tag-${{ matrix.platform }}-${{ matrix.arch }}"
+          New-Item -ItemType Directory -Force -Path "package/$name/bin" | Out-Null
+          Copy-Item "dist/bin/studiomdl.exe" "package/$name/bin/studiomdl.exe"
+          Copy-Item "README.md" "package/$name/README.md"
+          $archive = "$name.zip"
+          Compress-Archive -Path "package/$name" -DestinationPath $archive -Force
+          Add-Content -Path $env:GITHUB_ENV -Value "ARCHIVE=$archive"
+
+      - name: Package (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          name="MDLForge-$tag-${{ matrix.platform }}-${{ matrix.arch }}"
+          mkdir -p "package/$name/bin"
+          cp "dist/bin/studiomdl" "package/$name/bin/studiomdl"
+          cp "README.md" "package/$name/README.md"
+          archive="$name.tar.gz"
+          tar -czf "$archive" -C package "$name"
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
