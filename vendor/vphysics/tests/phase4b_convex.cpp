@@ -11,7 +11,8 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
-#include <dlfcn.h>
+
+#include "test_dl.h"
 
 // Minimal replicas of the Source types the factory returns. We only need
 // layout compatibility on the bits we touch; full headers are not required
@@ -49,10 +50,10 @@ int main( int argc, char **argv )
 		std::fprintf( stderr, "usage: %s <path-to-libvphysics>\n", argv[0] );
 		return 2;
 	}
-	void *h = dlopen( argv[1], RTLD_NOW );
-	if ( !h ) { std::fprintf( stderr, "dlopen: %s\n", dlerror() ); return 1; }
-	auto fn = reinterpret_cast<CreateInterfaceFn>( dlsym( h, "CreateInterface" ) );
-	if ( !fn ) { std::fprintf( stderr, "dlsym: %s\n", dlerror() ); return 1; }
+	void *h = TestDlOpen( argv[1] );
+	if ( !h ) { std::fprintf( stderr, "dlopen: %s\n", TestDlError() ); return 1; }
+	auto fn = reinterpret_cast<CreateInterfaceFn>( TestDlSym( h, "CreateInterface" ) );
+	if ( !fn ) { std::fprintf( stderr, "dlsym: %s\n", TestDlError() ); return 1; }
 
 	int rc = 0;
 	auto *coll = reinterpret_cast<IPhysicsCollisionMin *>( fn( "VPhysicsCollision007", &rc ) );

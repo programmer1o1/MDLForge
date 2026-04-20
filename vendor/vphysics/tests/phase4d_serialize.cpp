@@ -7,8 +7,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <dlfcn.h>
 #include <vector>
+
+#include "test_dl.h"
 
 struct Vector { float x, y, z; };
 class CPhysConvex;
@@ -90,9 +91,9 @@ int failures = 0;
 int main( int argc, char **argv )
 {
 	if ( argc < 2 ) { std::fprintf( stderr, "usage: %s <libvphysics>\n", argv[0] ); return 2; }
-	void *h = dlopen( argv[1], RTLD_NOW );
-	if ( !h ) { std::fprintf( stderr, "dlopen: %s\n", dlerror() ); return 1; }
-	auto fn = reinterpret_cast<CreateInterfaceFn>( dlsym( h, "CreateInterface" ) );
+	void *h = TestDlOpen( argv[1] );
+	if ( !h ) { std::fprintf( stderr, "dlopen: %s\n", TestDlError() ); return 1; }
+	auto fn = reinterpret_cast<CreateInterfaceFn>( TestDlSym( h, "CreateInterface" ) );
 	int rc = 0;
 	auto *coll = reinterpret_cast<IPhysicsCollisionMin *>( fn( "VPhysicsCollision007", &rc ) );
 
