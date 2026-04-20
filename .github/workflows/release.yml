@@ -24,6 +24,8 @@ jobs:
             arch: x86_64
 
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -92,31 +94,14 @@ jobs:
           tar -czf "$archive" -C package "$name"
           echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.platform }}-${{ matrix.arch }}
-          path: ${{ env.ARCHIVE }}
-          if-no-files-found: error
-
-  release:
-    name: Publish GitHub Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-artifacts
-          merge-multiple: true
-
-      - name: Create GitHub Release
+      # Upload directly to the GitHub Release — avoids the Actions artifact
+      # storage quota entirely. action-gh-release is idempotent: whichever
+      # matrix job reaches it first creates the release, later jobs attach
+      # additional files to the same release.
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: release-artifacts/*
+          files: ${{ env.ARCHIVE }}
           generate_release_notes: true
           fail_on_unmatched_files: true
