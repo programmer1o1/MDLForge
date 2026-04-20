@@ -1,0 +1,5 @@
+Source: https://github.com/akuukka/quickhull
+Commit: 4ef66c68950cb4db11d3b75bfe4034d807485ad0
+Date:   2024-07-04
+License: Public Domain (per README.md: "This implementation is 100% Public
+         Domain. Feel free to use.")

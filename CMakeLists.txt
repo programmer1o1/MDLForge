@@ -17,6 +17,19 @@ option(
     "Link the MSVC runtime statically (/MT) for easier redistribution"
     OFF
 )
+
+option(
+    MDLFORGE_BUILD_VPHYSICS
+    "Build the bundled clean-room vphysics module (vendor/vphysics)"
+    ON
+)
+
+option(
+    MDLFORGE_VPHYSICS_TESTS
+    "Build + register CTest targets for the vphysics phase tests"
+    ON
+)
+
 if(STUDIOMDL_REQUIRE_32BIT AND CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(
         FATAL_ERROR
@@ -26,5 +39,15 @@ if(STUDIOMDL_REQUIRE_32BIT AND CMAKE_SIZEOF_VOID_P EQUAL 8)
     )
 endif()
 
-# Build only the studiomdl tool.
+if(MDLFORGE_VPHYSICS_TESTS)
+    enable_testing()
+endif()
+
+# Build the studiomdl tool.
 add_subdirectory(utils/studiomdl)
+
+# Bundled clean-room vphysics. Must come after studiomdl — it uses
+# $<TARGET_FILE_DIR:studiomdl> to colocate its output.
+if(MDLFORGE_BUILD_VPHYSICS)
+    add_subdirectory(vendor/vphysics)
+endif()

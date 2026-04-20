@@ -57,4 +57,38 @@ studiomdl <path/to/model.qc> -game <path/to/moddir>
 
 ## Notes
 
-- `$collisionjoints`/`$collisionmodel` compilation requires the `vphysics` module to be loadable; the loader tries the mod's `bin` and the parent `bin` (common Source layout).
+### vphysics (collision compilation)
+
+`$collisionjoints`/`$collisionmodel` compilation requires an `IPhysicsCollision` / `IPhysicsSurfaceProps` implementation loadable at runtime. MDLForge ships a bundled clean-room module under `vendor/vphysics/` that builds on all three platforms and is placed next to the `studiomdl` binary so the loader finds it automatically. No leaked Valve source is used; the implementation is MIT-licensed.
+
+The bundled module:
+
+- Is enabled by default via `-DMDLFORGE_BUILD_VPHYSICS=ON`. Set `OFF` to skip it if you want to provide your own `libvphysics.{so,dylib,dll}`.
+- Produces `.phy` files that are structurally compatible with Valve's format (VPHY/IVPS magic, correct compact-surface + ledgetree + compactledge layout). Byte-for-byte equivalence with Valve's output is **not** a goal — convex-hull ordering and LOD/drag fields differ — but Source games should load the output without issue for all typical collision shapes. Competitive-precision use cases (surf/bhop movement servers) may notice small differences in convex silhouettes.
+- Uses [akuukka/quickhull](https://github.com/akuukka/quickhull) (public domain) for convex hull construction.
+
+The loader (`utils/common/physdll.cpp`) probes per-OS filenames:
+
+- Windows: `vphysics.dll`
+- Linux: `libvphysics.so`, `vphysics.so`
+- macOS: `libvphysics.dylib`, `vphysics.dylib`
+
+Search order remains: bare filename (standard loader paths) → `<gamedir>/bin/` → `<gameroot>/bin/`. To use a user-supplied vphysics instead of the bundled one, drop it into any of those locations — the first found wins.
+
+### Tests
+
+With the vphysics module enabled, CTest targets are registered:
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+Runs four phase tests:
+- `phase4a_smoke` — dlopen + `CreateInterface` factory
+- `phase4b_convex` — `ConvexFromVerts` against analytical cube / tetrahedron
+- `phase4d_serialize` — round-trip `.phy` structure
+- `phase4e_surfaceprops` — KV1 surfaceproperties parser
+
+Disable with `-DMDLFORGE_VPHYSICS_TESTS=OFF`.
+
+A `.phy` dumper lives at `vendor/vphysics/tools/phy_dump.cpp` for inspecting any `.phy` file's structure — useful when diagnosing model loading issues in-game.
