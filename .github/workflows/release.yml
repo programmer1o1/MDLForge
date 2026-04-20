@@ -67,7 +67,10 @@ jobs:
           $name = "MDLForge-$tag-${{ matrix.platform }}-${{ matrix.arch }}"
           New-Item -ItemType Directory -Force -Path "package/$name/bin" | Out-Null
           Copy-Item "dist/bin/studiomdl.exe" "package/$name/bin/studiomdl.exe"
+          # Bundled vphysics module — studiomdl loads it for $collisionmodel.
+          Copy-Item "dist/bin/vphysics.dll" "package/$name/bin/vphysics.dll"
           Copy-Item "README.md" "package/$name/README.md"
+          Copy-Item "vendor/vphysics/LICENSE" "package/$name/VPHYSICS_LICENSE"
           $archive = "$name.zip"
           Compress-Archive -Path "package/$name" -DestinationPath $archive -Force
           Add-Content -Path $env:GITHUB_ENV -Value "ARCHIVE=$archive"
@@ -81,7 +84,10 @@ jobs:
           name="MDLForge-$tag-${{ matrix.platform }}-${{ matrix.arch }}"
           mkdir -p "package/$name/bin"
           cp "dist/bin/studiomdl" "package/$name/bin/studiomdl"
+          # Bundled vphysics — glob matches .so on Linux and .dylib on macOS.
+          cp dist/bin/libvphysics.* "package/$name/bin/"
           cp "README.md" "package/$name/README.md"
+          cp "vendor/vphysics/LICENSE" "package/$name/VPHYSICS_LICENSE"
           archive="$name.tar.gz"
           tar -czf "$archive" -C package "$name"
           echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
