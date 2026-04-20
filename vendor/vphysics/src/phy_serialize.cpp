@@ -20,6 +20,9 @@
 #include "phy_format.h"
 #include "cphysconvex.h"
 
+// Disable Valve's min/max macros before using STL algorithm functions.
+#include "tier0/valve_minmax_off.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>

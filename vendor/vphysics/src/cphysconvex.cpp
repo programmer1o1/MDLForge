@@ -4,6 +4,11 @@
 
 #include "cphysconvex.h"
 
+// Valve's tier0 headers (pulled in by mathlib/vector.h) define min/max as
+// macros via valve_minmax_on.h, which breaks std::min/std::max with MSVC.
+// This header undoes that before we use STL.
+#include "tier0/valve_minmax_off.h"
+
 #include "QuickHull.hpp"
 
 #include <algorithm>

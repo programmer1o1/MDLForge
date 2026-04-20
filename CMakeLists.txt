@@ -30,6 +30,12 @@ option(
     ON
 )
 
+# When the vphysics shim is built, studiomdl_mathlib/tier1 get linked into
+# a shared library, so they must be position-independent.
+if(MDLFORGE_BUILD_VPHYSICS)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
 if(STUDIOMDL_REQUIRE_32BIT AND CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(
         FATAL_ERROR

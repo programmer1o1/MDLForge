@@ -1,5 +1,9 @@
 #include "cphyscollide.h"
 
+// Turn off Valve's min/max macros before using std::min/std::max (see
+// tier0/valve_minmax_on.h). Required for MSVC builds to compile.
+#include "tier0/valve_minmax_off.h"
+
 #include <algorithm>
 
 namespace mdlforge_vphysics
