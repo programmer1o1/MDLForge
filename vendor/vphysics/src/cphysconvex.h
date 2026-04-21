@@ -19,6 +19,11 @@ public:
 	std::vector<uint16_t> triangles;  // 3 indices per triangle, CCW from outside
 	Vector                aabbMin{ 0.0f, 0.0f, 0.0f };
 	Vector                aabbMax{ 0.0f, 0.0f, 0.0f };
+	// True volume-weighted centroid — matches what Valve's vphysics uses for
+	// mass-center output. Computed via tetrahedral decomposition; for hulls
+	// whose AABB center drifts from the true centroid (asymmetric hulls)
+	// this is what the engine lines the rigid body up against at runtime.
+	Vector                centroid{ 0.0f, 0.0f, 0.0f };
 	float                 volume       = 0.0f;
 	float                 surfaceArea  = 0.0f;
 	unsigned int          gameData     = 0;

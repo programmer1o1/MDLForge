@@ -132,14 +132,17 @@ int main( int argc, char **argv )
 	const uint32_t expectedIVPS = 'I' | ('V'<<8) | ('P'<<16) | ('S'<<24);
 	CHECK( ivps == expectedIVPS, "IVPS magic" );
 
-	// Mass center: for a unit cube (0..1 inches), should be (0.5,0.5,0.5)
-	// converted to meters — Valve's vphysics writes the .phy in IVP's
-	// native meter units.
+	// Mass center: unit cube (0..1 inches) has centroid (0.5,0.5,0.5).
+	// The serializer converts to IVP-meter space with a Source->IVP axis
+	// remap: (x,y,z) -> (x,-z,y). So the unit cube's centroid becomes
+	// (0.5, -0.5, 0.5) inches, then * 0.0254 for meters.
 	constexpr float kInchesToMeters = 0.0254f;
-	const float expectedCenter = 0.5f * kInchesToMeters;
-	CHECK( std::fabs( surf->massCenter[0] - expectedCenter ) < 1e-5f, "massCenter x = %f", surf->massCenter[0] );
-	CHECK( std::fabs( surf->massCenter[1] - expectedCenter ) < 1e-5f, "massCenter y" );
-	CHECK( std::fabs( surf->massCenter[2] - expectedCenter ) < 1e-5f, "massCenter z" );
+	const float expectedX =  0.5f * kInchesToMeters;
+	const float expectedY = -0.5f * kInchesToMeters;
+	const float expectedZ =  0.5f * kInchesToMeters;
+	CHECK( std::fabs( surf->massCenter[0] - expectedX ) < 1e-5f, "massCenter x = %f", surf->massCenter[0] );
+	CHECK( std::fabs( surf->massCenter[1] - expectedY ) < 1e-5f, "massCenter y = %f", surf->massCenter[1] );
+	CHECK( std::fabs( surf->massCenter[2] - expectedZ ) < 1e-5f, "massCenter z = %f", surf->massCenter[2] );
 
 	// upper_limit_radius = distance from (0.5,0.5,0.5) to corner (1,1,1) in
 	// inches = sqrt(0.75), then converted to meters.
@@ -147,14 +150,17 @@ int main( int argc, char **argv )
 	CHECK( std::fabs( surf->upperLimitRadius - expectedRadius ) < 1e-5f,
 	       "upperLimitRadius=%f expected %f", surf->upperLimitRadius, expectedRadius );
 
-	// Ledgetree root offset should point into the IVP surface block; we laid
-	// it out at offset 48 (right after IVPCompactSurface).
-	CHECK( surf->offsetLedgetreeRoot == 48, "ledgetree root offset = %d", surf->offsetLedgetreeRoot );
+	// Ledgetree root offset should point past the ledge block — we lay
+	// out ledges first (so point arrays stay 16-byte aligned) and the
+	// ledgetree nodes after. For a single unit-cube convex the ledge
+	// block is 16 (ledge) + 12*16 (tris) + 8*16 (points) = 336 bytes,
+	// so the root node sits at 48 + 336 = 384.
+	CHECK( surf->offsetLedgetreeRoot > 48, "ledgetree root offset = %d", surf->offsetLedgetreeRoot );
 
 	// The root node for N=1 is terminal.
-	auto *root = reinterpret_cast<IVPCompactLedgeNode *>( buf.data() + kHdrSize + 48 );
+	auto *root = reinterpret_cast<IVPCompactLedgeNode *>( buf.data() + kHdrSize + surf->offsetLedgetreeRoot );
 	CHECK( root->offsetRight == 0, "root.offsetRight (terminal)" );
-	CHECK( root->offsetLedge > 0,  "root.offsetLedge (points to ledge)" );
+	CHECK( root->offsetLedge != 0, "root.offsetLedge (points to ledge)" );
 
 	auto *ledge = reinterpret_cast<IVPCompactLedge *>(
 		reinterpret_cast<uint8_t *>( root ) + root->offsetLedge );

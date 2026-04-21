@@ -43,6 +43,21 @@ namespace
 // studiomdl's mass calculations expect) and only scale at write time.
 constexpr float kInchesToMeters = 0.0254f;
 
+// Source uses (X forward, Y left, Z up); Valve's stock vphysics emits the
+// .phy in IVP's body-local frame which is Source rotated +90° about the X
+// axis — i.e. (x, y, z) -> (x, -z, y). Empirically verified by compiling
+// niktoper's SMD with our tool and comparing mass-center and AABB-box
+// fields against Valve's shipped niktoper_pm.phy: all solids agree field
+// by field under this remap, disagree without it. Without this transform
+// every hull renders rotated 90° about its bone's local X-axis in-engine.
+static inline void SourceToIVP( float sx, float sy, float sz,
+                                float &ox, float &oy, float &oz )
+{
+	ox =  sx;
+	oy = -sz;
+	oz =  sy;
+}
+
 constexpr size_t kHeaderSize  = sizeof( CompactSurfaceHeader );   // 28
 constexpr size_t kSurfaceSize = sizeof( IVPCompactSurface );      // 48
 constexpr size_t kNodeSize    = sizeof( IVPCompactLedgeNode );    // 28
@@ -138,18 +153,21 @@ size_t PlanSubtree( size_t firstLeaf, size_t leafCount, std::vector<NodeMeta> &n
 }
 
 // Fill the bounding sphere + half-extent fields of a leaf node from its
-// convex's AABB. AABB is stored in inches; convert to meters for the file.
+// convex's AABB. AABB is stored in Source-space inches; convert to IVP
+// meters (with axis remap) for the file.
 void SetNodeBoundsFromConvex( IVPCompactLedgeNode &node, const CPhysConvex_Impl &cv )
 {
-	const float cx = 0.5f * ( cv.aabbMin.x + cv.aabbMax.x ) * kInchesToMeters;
-	const float cy = 0.5f * ( cv.aabbMin.y + cv.aabbMax.y ) * kInchesToMeters;
-	const float cz = 0.5f * ( cv.aabbMin.z + cv.aabbMax.z ) * kInchesToMeters;
-	const float hx = 0.5f * ( cv.aabbMax.x - cv.aabbMin.x ) * kInchesToMeters;
-	const float hy = 0.5f * ( cv.aabbMax.y - cv.aabbMin.y ) * kInchesToMeters;
-	const float hz = 0.5f * ( cv.aabbMax.z - cv.aabbMin.z ) * kInchesToMeters;
-	node.center[0] = cx;
-	node.center[1] = cy;
-	node.center[2] = cz;
+	const float srcCx = 0.5f * ( cv.aabbMin.x + cv.aabbMax.x ) * kInchesToMeters;
+	const float srcCy = 0.5f * ( cv.aabbMin.y + cv.aabbMax.y ) * kInchesToMeters;
+	const float srcCz = 0.5f * ( cv.aabbMin.z + cv.aabbMax.z ) * kInchesToMeters;
+	const float srcHx = 0.5f * ( cv.aabbMax.x - cv.aabbMin.x ) * kInchesToMeters;
+	const float srcHy = 0.5f * ( cv.aabbMax.y - cv.aabbMin.y ) * kInchesToMeters;
+	const float srcHz = 0.5f * ( cv.aabbMax.z - cv.aabbMin.z ) * kInchesToMeters;
+	SourceToIVP( srcCx, srcCy, srcCz, node.center[0], node.center[1], node.center[2] );
+	// Half-extents remap too (absolute values since they're unsigned).
+	float hx, hy, hz;
+	SourceToIVP( srcHx, srcHy, srcHz, hx, hy, hz );
+	hx = std::fabs( hx ); hy = std::fabs( hy ); hz = std::fabs( hz );
 	node.radius    = std::sqrt( hx * hx + hy * hy + hz * hz );
 	const float scale = 255.0f / std::max( node.radius, 1e-4f );
 	auto clampByte = []( float v ) -> uint8_t {
@@ -201,26 +219,38 @@ int32_t SerializeCollide( uint8_t *dst, const CPhysCollide_Impl *c )
 
 	const size_t N = c->convexes.size();
 
+	// --- Layout: matches Valve's shipped .phy files.
+	//
+	//   [IVPCompactSurface (48 bytes)]
+	//   [leaf 0: ledge (16) + tris (16*nTri) + points (16*nPts)]
+	//   [leaf 1: ...]
+	//   ...
+	//   [ledgetree nodes (28 bytes each)]
+	//
+	// Ledge blocks are placed FIRST so they stay 16-byte aligned (each leaf
+	// block size is a multiple of 16). The 28-byte ledgetree nodes go at the
+	// end where their smaller alignment is harmless. Placing nodes first
+	// would leave every ledge/point block 12 bytes off — IVP's runtime does
+	// 16-byte SSE-aligned loads on point coords, and on a 64-bit Source
+	// engine the misalignment shows up as hulls rotated relative to the
+	// bone they're supposed to follow.
+	std::vector<size_t> ledgeOffsetPerLeaf( N, 0 );
+	size_t cursor = kSurfaceSize;
+	for ( size_t i = 0; i < N; ++i )
+	{
+		ledgeOffsetPerLeaf[ i ] = cursor;
+		cursor += LedgeBlockBytes( c->convexes[ i ] );
+	}
+	const size_t ledgetreeBase = cursor;
+
 	// --- Plan ledgetree node offsets (relative to start of IVP surface).
 	std::vector<NodeMeta> nodes;
 	nodes.reserve( NodeCountFor( N ) );
-	const size_t ledgetreeBase = kSurfaceSize;    // ledgetree starts right after IVPCompactSurface
 	const size_t rootIdx = PlanSubtree( 0, N, nodes, ledgetreeBase );
 	assert( rootIdx == 0 );
 	(void) rootIdx;
 
-	// --- Plan leaf-block offsets (relative to the IVP surface start).
-	// Leaves are written after all ledgetree nodes, in the order leaves
-	// appear in `nodes`. For each leaf we store: ledge → triangles → points.
-	size_t cursor = ledgetreeBase + nodes.size() * kNodeSize;
-	std::vector<size_t> ledgeOffsetPerLeaf( N, 0 );
-	for ( const NodeMeta &n : nodes )
-	{
-		if ( !n.terminal )
-			continue;
-		ledgeOffsetPerLeaf[ n.leafIndex ] = cursor;
-		cursor += LedgeBlockBytes( c->convexes[ n.leafIndex ] );
-	}
+	cursor += nodes.size() * kNodeSize;
 	// `cursor` is now the total byte size of the IVP surface (header excluded).
 	const size_t ivpSurfaceBytes = cursor;
 
@@ -236,12 +266,14 @@ int32_t SerializeCollide( uint8_t *dst, const CPhysCollide_Impl *c )
 	hdr->axisMapSize = 0;
 
 	// --- Write IVPCompactSurface. Everything here lives in IVP's native
-	// meter units; convert from the inch-space our runtime stores.
+	// meter units with the Source→IVP axis remap applied.
 	uint8_t *surfBase = dst + kHeaderSize;
 	auto *surface = reinterpret_cast<IVPCompactSurface *>( surfBase );
-	surface->massCenter[0]      = c->massCenter.x * kInchesToMeters;
-	surface->massCenter[1]      = c->massCenter.y * kInchesToMeters;
-	surface->massCenter[2]      = c->massCenter.z * kInchesToMeters;
+	SourceToIVP(
+		c->massCenter.x * kInchesToMeters,
+		c->massCenter.y * kInchesToMeters,
+		c->massCenter.z * kInchesToMeters,
+		surface->massCenter[0], surface->massCenter[1], surface->massCenter[2] );
 	// Placeholder principal inertia — the engine uses these when building
 	// the rigid body. Real values would require integrating over the hull;
 	// unit values here give reasonable rotational behavior for ragdolls
@@ -351,9 +383,11 @@ int32_t SerializeCollide( uint8_t *dst, const CPhysCollide_Impl *c )
 		for ( size_t p = 0; p < nPts; ++p )
 		{
 			auto *pt = reinterpret_cast<IVPCompactPoint *>( ptBase + p * kPointSize );
-			pt->xyz[0] = cv.points[p].x * kInchesToMeters;
-			pt->xyz[1] = cv.points[p].y * kInchesToMeters;
-			pt->xyz[2] = cv.points[p].z * kInchesToMeters;
+			SourceToIVP(
+				cv.points[p].x * kInchesToMeters,
+				cv.points[p].y * kInchesToMeters,
+				cv.points[p].z * kInchesToMeters,
+				pt->xyz[0], pt->xyz[1], pt->xyz[2] );
 			pt->xyz[3] = 0.0f;
 		}
 	}

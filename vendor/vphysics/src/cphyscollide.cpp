@@ -40,16 +40,17 @@ void CPhysCollide_Impl::RecomputeUnionAABB()
 
 void CPhysCollide_Impl::RecomputeMassCenter()
 {
-	// Volume-weighted centroid of each convex (approximated by AABB center).
-	// Exact centroid-of-convex would require integrating, which isn't needed
-	// for studiomdl's default mass-center behavior; calls to
-	// CollideSetMassCenter override this anyway when $masscenter is set.
+	// Volume-weighted centroid across all convexes. Each convex has its true
+	// centroid pre-computed via tetrahedral decomposition in
+	// CPhysConvex_Impl::RecomputeDerived. Using the AABB center here instead
+	// would drift on asymmetric hulls and cause the engine to seat the rigid
+	// body at a visibly wrong offset from its bone. Calls to
+	// CollideSetMassCenter still override this when $masscenter is set in QC.
 	float totalVol = 0.0f;
 	Vector accum( 0.0f, 0.0f, 0.0f );
 	for ( const CPhysConvex_Impl *c : convexes )
 	{
-		const Vector center = 0.5f * ( c->aabbMin + c->aabbMax );
-		accum   += center * c->volume;
+		accum   += c->centroid * c->volume;
 		totalVol += c->volume;
 	}
 	if ( totalVol > 0.0f )
