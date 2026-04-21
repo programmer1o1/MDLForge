@@ -34,6 +34,15 @@ namespace mdlforge_vphysics
 namespace
 {
 
+// Source's public vphysics interface exposes distances in inches (see
+// public/vphysics_interface.h: METERS_PER_INCH). Internally IVP operates
+// in meters, and the on-disk .phy file is in the IVP coordinate space —
+// Valve's stock vphysics.dll converts inch-space inputs from studiomdl
+// into meters before serializing. We keep hull data in inches at runtime
+// (so ConvexVolume / ConvexSurfaceArea return inch-native numbers that
+// studiomdl's mass calculations expect) and only scale at write time.
+constexpr float kInchesToMeters = 0.0254f;
+
 constexpr size_t kHeaderSize  = sizeof( CompactSurfaceHeader );   // 28
 constexpr size_t kSurfaceSize = sizeof( IVPCompactSurface );      // 48
 constexpr size_t kNodeSize    = sizeof( IVPCompactLedgeNode );    // 28
@@ -129,15 +138,15 @@ size_t PlanSubtree( size_t firstLeaf, size_t leafCount, std::vector<NodeMeta> &n
 }
 
 // Fill the bounding sphere + half-extent fields of a leaf node from its
-// convex's AABB.
+// convex's AABB. AABB is stored in inches; convert to meters for the file.
 void SetNodeBoundsFromConvex( IVPCompactLedgeNode &node, const CPhysConvex_Impl &cv )
 {
-	const float cx = 0.5f * ( cv.aabbMin.x + cv.aabbMax.x );
-	const float cy = 0.5f * ( cv.aabbMin.y + cv.aabbMax.y );
-	const float cz = 0.5f * ( cv.aabbMin.z + cv.aabbMax.z );
-	const float hx = 0.5f * ( cv.aabbMax.x - cv.aabbMin.x );
-	const float hy = 0.5f * ( cv.aabbMax.y - cv.aabbMin.y );
-	const float hz = 0.5f * ( cv.aabbMax.z - cv.aabbMin.z );
+	const float cx = 0.5f * ( cv.aabbMin.x + cv.aabbMax.x ) * kInchesToMeters;
+	const float cy = 0.5f * ( cv.aabbMin.y + cv.aabbMax.y ) * kInchesToMeters;
+	const float cz = 0.5f * ( cv.aabbMin.z + cv.aabbMax.z ) * kInchesToMeters;
+	const float hx = 0.5f * ( cv.aabbMax.x - cv.aabbMin.x ) * kInchesToMeters;
+	const float hy = 0.5f * ( cv.aabbMax.y - cv.aabbMin.y ) * kInchesToMeters;
+	const float hz = 0.5f * ( cv.aabbMax.z - cv.aabbMin.z ) * kInchesToMeters;
 	node.center[0] = cx;
 	node.center[1] = cy;
 	node.center[2] = cz;
@@ -226,17 +235,23 @@ int32_t SerializeCollide( uint8_t *dst, const CPhysCollide_Impl *c )
 	hdr->dragAxisAreas[2] = c->orthographicAreas.z;
 	hdr->axisMapSize = 0;
 
-	// --- Write IVPCompactSurface.
+	// --- Write IVPCompactSurface. Everything here lives in IVP's native
+	// meter units; convert from the inch-space our runtime stores.
 	uint8_t *surfBase = dst + kHeaderSize;
 	auto *surface = reinterpret_cast<IVPCompactSurface *>( surfBase );
-	surface->massCenter[0]      = c->massCenter.x;
-	surface->massCenter[1]      = c->massCenter.y;
-	surface->massCenter[2]      = c->massCenter.z;
+	surface->massCenter[0]      = c->massCenter.x * kInchesToMeters;
+	surface->massCenter[1]      = c->massCenter.y * kInchesToMeters;
+	surface->massCenter[2]      = c->massCenter.z * kInchesToMeters;
+	// Placeholder principal inertia — the engine uses these when building
+	// the rigid body. Real values would require integrating over the hull;
+	// unit values here give reasonable rotational behavior for ragdolls
+	// while the shipped mass acts as the dominant factor.
 	surface->rotationInertia[0] = 1.0f;
 	surface->rotationInertia[1] = 1.0f;
 	surface->rotationInertia[2] = 1.0f;
-	// Upper limit radius = max distance from mass center to any hull vertex.
-	float r2max = 0.0f;
+	// Upper limit radius = max distance (in meters) from mass center to
+	// any hull vertex.
+	float r2maxInches = 0.0f;
 	for ( const auto *cv : c->convexes )
 	{
 		for ( const Vector &p : cv->points )
@@ -244,10 +259,10 @@ int32_t SerializeCollide( uint8_t *dst, const CPhysCollide_Impl *c )
 			const float dx = p.x - c->massCenter.x;
 			const float dy = p.y - c->massCenter.y;
 			const float dz = p.z - c->massCenter.z;
-			r2max = std::max( r2max, dx * dx + dy * dy + dz * dz );
+			r2maxInches = std::max( r2maxInches, dx * dx + dy * dy + dz * dz );
 		}
 	}
-	surface->upperLimitRadius       = std::sqrt( r2max );
+	surface->upperLimitRadius       = std::sqrt( r2maxInches ) * kInchesToMeters;
 	surface->maxDeviationAndByteSize = PackMaxDevAndByteSize( 0, static_cast<uint32_t>( ivpSurfaceBytes ) );
 	surface->offsetLedgetreeRoot    = static_cast<int32_t>( ledgetreeBase );  // root is the first node
 	surface->unused[0] = 0;
@@ -336,9 +351,9 @@ int32_t SerializeCollide( uint8_t *dst, const CPhysCollide_Impl *c )
 		for ( size_t p = 0; p < nPts; ++p )
 		{
 			auto *pt = reinterpret_cast<IVPCompactPoint *>( ptBase + p * kPointSize );
-			pt->xyz[0] = cv.points[p].x;
-			pt->xyz[1] = cv.points[p].y;
-			pt->xyz[2] = cv.points[p].z;
+			pt->xyz[0] = cv.points[p].x * kInchesToMeters;
+			pt->xyz[1] = cv.points[p].y * kInchesToMeters;
+			pt->xyz[2] = cv.points[p].z * kInchesToMeters;
 			pt->xyz[3] = 0.0f;
 		}
 	}

@@ -132,14 +132,20 @@ int main( int argc, char **argv )
 	const uint32_t expectedIVPS = 'I' | ('V'<<8) | ('P'<<16) | ('S'<<24);
 	CHECK( ivps == expectedIVPS, "IVPS magic" );
 
-	// Mass center: for a unit cube (0..1), should be (0.5,0.5,0.5).
-	CHECK( std::fabs( surf->massCenter[0] - 0.5f ) < 1e-3f, "massCenter x = %f", surf->massCenter[0] );
-	CHECK( std::fabs( surf->massCenter[1] - 0.5f ) < 1e-3f, "massCenter y" );
-	CHECK( std::fabs( surf->massCenter[2] - 0.5f ) < 1e-3f, "massCenter z" );
+	// Mass center: for a unit cube (0..1 inches), should be (0.5,0.5,0.5)
+	// converted to meters — Valve's vphysics writes the .phy in IVP's
+	// native meter units.
+	constexpr float kInchesToMeters = 0.0254f;
+	const float expectedCenter = 0.5f * kInchesToMeters;
+	CHECK( std::fabs( surf->massCenter[0] - expectedCenter ) < 1e-5f, "massCenter x = %f", surf->massCenter[0] );
+	CHECK( std::fabs( surf->massCenter[1] - expectedCenter ) < 1e-5f, "massCenter y" );
+	CHECK( std::fabs( surf->massCenter[2] - expectedCenter ) < 1e-5f, "massCenter z" );
 
-	// upper_limit_radius = distance from (0.5,0.5,0.5) to corner (1,1,1) = sqrt(0.75)
-	CHECK( std::fabs( surf->upperLimitRadius - std::sqrt(0.75f) ) < 1e-3f,
-	       "upperLimitRadius=%f expected %f", surf->upperLimitRadius, std::sqrt(0.75f) );
+	// upper_limit_radius = distance from (0.5,0.5,0.5) to corner (1,1,1) in
+	// inches = sqrt(0.75), then converted to meters.
+	const float expectedRadius = std::sqrt( 0.75f ) * kInchesToMeters;
+	CHECK( std::fabs( surf->upperLimitRadius - expectedRadius ) < 1e-5f,
+	       "upperLimitRadius=%f expected %f", surf->upperLimitRadius, expectedRadius );
 
 	// Ledgetree root offset should point into the IVP surface block; we laid
 	// it out at offset 48 (right after IVPCompactSurface).
