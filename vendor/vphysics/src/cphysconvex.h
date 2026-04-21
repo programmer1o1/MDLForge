@@ -24,6 +24,11 @@ public:
 	// whose AABB center drifts from the true centroid (asymmetric hulls)
 	// this is what the engine lines the rigid body up against at runtime.
 	Vector                centroid{ 0.0f, 0.0f, 0.0f };
+	// Principal moments of inertia about the centroid, per unit mass, in
+	// the same units as `points`. The three values are the (x,y,z)
+	// diagonal of the inertia tensor; off-diagonal terms are neglected,
+	// matching Valve's .phy convention of storing only three values.
+	Vector                inertiaDiag{ 1.0f, 1.0f, 1.0f };
 	float                 volume       = 0.0f;
 	float                 surfaceArea  = 0.0f;
 	unsigned int          gameData     = 0;

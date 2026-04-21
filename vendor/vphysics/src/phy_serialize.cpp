@@ -274,13 +274,36 @@ int32_t SerializeCollide( uint8_t *dst, const CPhysCollide_Impl *c )
 		c->massCenter.y * kInchesToMeters,
 		c->massCenter.z * kInchesToMeters,
 		surface->massCenter[0], surface->massCenter[1], surface->massCenter[2] );
-	// Placeholder principal inertia — the engine uses these when building
-	// the rigid body. Real values would require integrating over the hull;
-	// unit values here give reasonable rotational behavior for ragdolls
-	// while the shipped mass acts as the dominant factor.
-	surface->rotationInertia[0] = 1.0f;
-	surface->rotationInertia[1] = 1.0f;
-	surface->rotationInertia[2] = 1.0f;
+	// Principal moments of inertia per unit mass. Each convex's own
+	// inertia diagonal is computed via tetrahedral integration in
+	// CPhysConvex_Impl; aggregate across convexes weighted by volume,
+	// then convert from inch² to meter² and apply the Source→IVP axis
+	// swap (diagonal entries for Y and Z swap under the (x,-z,y)
+	// rotation; X stays put).
+	//
+	// Without real values here — e.g., with isotropic unit inertia —
+	// Source's constraint solver misbehaves: ragdolls sink through the
+	// floor, respond to forces as if they have orders-of-magnitude too
+	// much angular resistance, and fall noticeably slowly.
+	float accIxx = 0.0f, accIyy = 0.0f, accIzz = 0.0f;
+	float totalV = 0.0f;
+	for ( const auto *cv : c->convexes )
+	{
+		accIxx += cv->inertiaDiag.x * cv->volume;
+		accIyy += cv->inertiaDiag.y * cv->volume;
+		accIzz += cv->inertiaDiag.z * cv->volume;
+		totalV += cv->volume;
+	}
+	if ( totalV > 1e-6f )
+	{
+		accIxx /= totalV;
+		accIyy /= totalV;
+		accIzz /= totalV;
+	}
+	const float inchSqToMeterSq = kInchesToMeters * kInchesToMeters;
+	surface->rotationInertia[0] = accIxx * inchSqToMeterSq;
+	surface->rotationInertia[1] = accIzz * inchSqToMeterSq;  // Source Z → IVP Y
+	surface->rotationInertia[2] = accIyy * inchSqToMeterSq;  // Source Y → IVP Z
 	// Upper limit radius = max distance (in meters) from mass center to
 	// any hull vertex.
 	float r2maxInches = 0.0f;
