@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//===== Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: 
 //
@@ -32,7 +32,9 @@
 #include "tier0/dbg.h"
 #ifdef _WIN32
 #include <direct.h> // getcwd
-#elif _LINUX
+#else
+#include <unistd.h> // getcwd
+#include <dlfcn.h>  // dlopen, dlsym
 #define _getcwd getcwd
 #endif
 
@@ -83,16 +85,18 @@ void* CreateInterface( const char *pName, int *pReturnCode )
 }
 
 
-#ifdef _LINUX
-// Linux doesn't have this function so this emulates its functionality
+#ifndef _WIN32
+// POSIX doesn't have GetModuleHandle; emulate by re-opening the library
+// and immediately decrementing its reference count. Works on Linux and macOS.
 void *GetModuleHandle(const char *name)
 {
 	void *handle;
 
 	if( name == NULL )
 	{
-		// hmm, how can this be handled under linux....
-		// is it even needed?
+		// Returning NULL here is analogous to GetModuleHandle(NULL) on
+		// Windows returning the main executable's handle; dlopen(NULL, ...)
+		// does the same, but the current callers never rely on it.
 		return NULL;
 	}
 
@@ -158,9 +162,14 @@ HMODULE Sys_LoadLibrary( const char *pLibraryName )
 #if defined(_WIN32)
 	const char *pModuleExtension = ".dll";
 	const char *pModuleAddition = pModuleExtension;
-#elif _LINUX
+#elif defined(__APPLE__)
+	const char *pModuleExtension = ".dylib";
+	const char *pModuleAddition = pModuleExtension;
+#else
 	const char *pModuleExtension = ".so";
-	const char *pModuleAddition = "_i486.so"; // if an extension is on the filename assume the i486 binary set
+	// Stock Valve appends "_i486.so" â€” keep the plain ".so" here so modern
+	// x86_64/arm64 builds can load normally-named shared objects.
+	const char *pModuleAddition = pModuleExtension;
 #endif
 	Q_strncpy(str, pLibraryName, sizeof(str));
 	if ( !Q_stristr( str, pModuleExtension ) )
@@ -170,7 +179,7 @@ HMODULE Sys_LoadLibrary( const char *pLibraryName )
 	Q_FixSlashes( str );
 #ifdef _WIN32
 	return LoadLibrary( str );
-#elif _LINUX
+#else
 	return dlopen( str, RTLD_NOW );
 #endif
 }
@@ -288,7 +297,7 @@ void Sys_UnloadModule( CSysModule *pModule )
 
 #ifdef _WIN32
 	FreeLibrary( hDLL );
-#elif defined(_LINUX)
+#else
 	dlclose((void *)hDLL);
 #endif
 }
@@ -307,14 +316,10 @@ CreateInterfaceFn Sys_GetFactory( CSysModule *pModule )
 	HMODULE	hDLL = reinterpret_cast<HMODULE>(pModule);
 #ifdef _WIN32
 	return reinterpret_cast<CreateInterfaceFn>(GetProcAddress( hDLL, CREATEINTERFACE_PROCNAME ));
-#elif defined(_LINUX)
-	// Linux gives this error:
-	//../public/interface.cpp: In function `IBaseInterface *(*Sys_GetFactory
-	//(CSysModule *)) (const char *, int *)':
-	//../public/interface.cpp:154: ISO C++ forbids casting between
-	//pointer-to-function and pointer-to-object
-	//
-	// so lets get around it :)
+#else
+	// Linux/macOS: ISO C++ forbids casting between pointer-to-function and
+	// pointer-to-object, but the dlsym contract is exactly that. C-style
+	// cast sidesteps the diagnostic.
 	return (CreateInterfaceFn)(GetProcAddress( hDLL, CREATEINTERFACE_PROCNAME ));
 #endif
 }
@@ -337,7 +342,7 @@ CreateInterfaceFn Sys_GetFactory( const char *pModuleName )
 {
 #ifdef _WIN32
 	return static_cast<CreateInterfaceFn>( Sys_GetProcAddress( pModuleName, CREATEINTERFACE_PROCNAME ) );
-#elif defined(_LINUX)
+#else
 	// see Sys_GetFactory( CSysModule *pModule ) for an explanation
 	return (CreateInterfaceFn)( Sys_GetProcAddress( pModuleName, CREATEINTERFACE_PROCNAME ) );
 #endif

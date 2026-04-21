@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -36,7 +36,8 @@
 #pragma once
 #endif
 
-#ifdef _LINUX
+#ifndef _WIN32
+// POSIX (Linux, macOS): stubs for the Windows DLL loader APIs.
 #include <dlfcn.h> // dlopen,dlclose, et al
 #include <unistd.h>
 
