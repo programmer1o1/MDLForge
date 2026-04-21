@@ -385,11 +385,12 @@ int32_t SerializeCollide( uint8_t *dst, const CPhysCollide_Impl *c )
 		ledge->nTriangles = static_cast<uint16_t>( nTri );
 		ledge->unknown    = 0;
 
-		// Triangles. For each edge, record the linear index (tri*3 + slot)
-		// of its twin half-edge in the adjacent triangle. IVP's contact
-		// walker traverses these during collision resolution; writing zero
-		// — the old behaviour — made rigid bodies partially penetrate
-		// surfaces anywhere a contact needed to span two triangles.
+		// Triangles. Writing opposite_index=0 trades complete contact
+		// walking for stability — IVP's walker and penetration-depth query
+		// assume adjacency and pierce_index are *both* populated; with only
+		// adjacency it loops forever on deep contacts and freezes the game.
+		// The adjacency data is still computed on cv.oppositeEdges so a
+		// future change that also writes pierce_index can switch over.
 		uint8_t *triBase = ledgeBase + kLedgeSize;
 		for ( size_t t = 0; t < nTri; ++t )
 		{
@@ -397,13 +398,10 @@ int32_t SerializeCollide( uint8_t *dst, const CPhysCollide_Impl *c )
 			const uint16_t i0 = cv.triangles[ t * 3 + 0 ];
 			const uint16_t i1 = cv.triangles[ t * 3 + 1 ];
 			const uint16_t i2 = cv.triangles[ t * 3 + 2 ];
-			const uint16_t o0 = cv.oppositeEdges[ t * 3 + 0 ];
-			const uint16_t o1 = cv.oppositeEdges[ t * 3 + 1 ];
-			const uint16_t o2 = cv.oppositeEdges[ t * 3 + 2 ];
 			tri->triHeader = PackTriHeader( static_cast<uint32_t>( t ), 0, 0, 0 );
-			tri->edges[0].bits = PackEdge( i0, o0, 0 );
-			tri->edges[1].bits = PackEdge( i1, o1, 0 );
-			tri->edges[2].bits = PackEdge( i2, o2, 0 );
+			tri->edges[0].bits = PackEdge( i0, 0, 0 );
+			tri->edges[1].bits = PackEdge( i1, 0, 0 );
+			tri->edges[2].bits = PackEdge( i2, 0, 0 );
 		}
 
 		// Points — padded to 16 bytes (4 floats).
