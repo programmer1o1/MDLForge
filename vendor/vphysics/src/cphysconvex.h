@@ -17,6 +17,13 @@ class CPhysConvex_Impl
 public:
 	std::vector<Vector>   points;     // hull vertices
 	std::vector<uint16_t> triangles;  // 3 indices per triangle, CCW from outside
+	// Per-edge linear index of the twin edge in the adjacent triangle that
+	// shares this half-edge. Indexed the same way as `triangles` — three
+	// entries per triangle, one per edge. IVP's contact walker follows
+	// these to traverse the hull during collision resolution; without
+	// them, contacts that span triangle boundaries fail and the rigid
+	// body partially penetrates surfaces.
+	std::vector<uint16_t> oppositeEdges;
 	Vector                aabbMin{ 0.0f, 0.0f, 0.0f };
 	Vector                aabbMax{ 0.0f, 0.0f, 0.0f };
 	// True volume-weighted centroid — matches what Valve's vphysics uses for

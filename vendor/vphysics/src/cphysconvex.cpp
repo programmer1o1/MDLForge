@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <unordered_map>
 
 namespace mdlforge_vphysics
 {
@@ -168,6 +169,44 @@ void ComputeAABB( const std::vector<Vector> &pts, Vector &outMin, Vector &outMax
 	}
 }
 
+// Build the half-edge → opposite-half-edge map for a closed convex hull.
+// Each triangle contributes three directed half-edges (a→b, b→c, c→a). In
+// a closed manifold, every half-edge (a→b) is matched by exactly one
+// half-edge (b→a) in an adjacent triangle. IVP stores the linear index
+// (tri*3 + slot) of that twin inside each compact edge's opposite_index
+// field — without it, the engine can't walk across triangle boundaries
+// during contact resolution and the rigid body tunnels through surfaces.
+std::vector<uint16_t> BuildOppositeEdges( const std::vector<uint16_t> &tris )
+{
+	const size_t nEdges = tris.size();
+	std::vector<uint16_t> opp( nEdges, 0 );
+	// Key = (from_vertex << 16) | to_vertex. Value = linear edge index.
+	std::unordered_map<uint32_t, uint16_t> halfEdges;
+	halfEdges.reserve( nEdges );
+	for ( size_t t = 0; t + 2 < nEdges; t += 3 )
+	{
+		for ( size_t e = 0; e < 3; ++e )
+		{
+			const uint16_t from = tris[t + e];
+			const uint16_t to   = tris[t + ( ( e + 1 ) % 3 )];
+			const uint32_t key  = ( static_cast<uint32_t>( from ) << 16 ) | to;
+			halfEdges[ key ] = static_cast<uint16_t>( t + e );
+		}
+	}
+	for ( size_t t = 0; t + 2 < nEdges; t += 3 )
+	{
+		for ( size_t e = 0; e < 3; ++e )
+		{
+			const uint16_t from = tris[t + e];
+			const uint16_t to   = tris[t + ( ( e + 1 ) % 3 )];
+			const uint32_t twinKey = ( static_cast<uint32_t>( to ) << 16 ) | from;
+			auto it = halfEdges.find( twinKey );
+			opp[t + e] = ( it != halfEdges.end() ) ? it->second : static_cast<uint16_t>( t + e );
+		}
+	}
+	return opp;
+}
+
 // Drop vertices that sit absurdly far from the rest of the cloud. Physics
 // SMDs with cross-bone triangles sometimes hand us a handful of points from
 // an adjacent bone that got dragged in via a shared triangle; without
@@ -237,6 +276,7 @@ void CPhysConvex_Impl::RecomputeDerived()
 	ComputeInertiaDiagonal(
 		points, triangles, centroid, volume,
 		inertiaDiag.x, inertiaDiag.y, inertiaDiag.z );
+	oppositeEdges = BuildOppositeEdges( triangles );
 }
 
 CPhysConvex_Impl *CPhysConvex_Impl::BuildFromVerts( Vector **ppVerts, int vertCount )
