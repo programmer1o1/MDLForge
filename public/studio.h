@@ -1,4 +1,4 @@
-//========= Copyright � 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright � 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -797,9 +797,14 @@ struct mstudiotexture_t
 	int						flags;
 	int						used;
     int						unused1;
-	mutable IMaterial		*material;  // fixme: this needs to go away . .isn't used by the engine, but is used by studiomdl
-	mutable void			*clientmaterial;	// gary, replace with client material pointer if used
-	
+	// On-disk 4-byte placeholders. The Source 1 file format pins these to
+	// 32 bits; a 64-bit studiomdl build cannot keep them as `void *` / real
+	// pointer types without shifting every subsequent field and breaking
+	// engine-side parsing. Neither is meaningful on disk — studiomdl writes
+	// zero here and the engine overwrites at load time.
+	int32_t					material_placeholder;
+	int32_t					clientmaterial_placeholder;
+
 	int						unused[10];
 };
 
@@ -866,7 +871,13 @@ struct mstudioiface_t
 
 
 struct mstudiomodel_t;
+struct mstudiomesh_t;
 
+// Runtime-only vertex-data view. Holds real pointers into the loaded .vvd
+// buffer. NOT embedded in any on-disk struct — the 32-bit Source MDL format
+// has 4-byte placeholders where these used to sit, and a 64-bit studiomdl
+// build cannot put real pointers there without shifting the layout.
+// GetVertexData() on mstudiomodel_t / mstudiomesh_t returns one of these.
 struct mstudio_modelvertexdata_t
 {
 	Vector				*Position( int i ) const;
@@ -877,9 +888,12 @@ struct mstudio_modelvertexdata_t
 	mstudiovertex_t		*Vertex( int i ) const;
 	bool				HasTangentData( void ) const;
 
-	// base of external vertex data stores
 	void				*pVertexData;
 	void				*pTangentData;
+
+	// Runtime-only back pointer, replaces the offsetof(mstudiomodel_t,
+	// vertexdata) walk that the old embedded design used.
+	const mstudiomodel_t *modelptr;
 };
 
 struct mstudio_meshvertexdata_t
@@ -892,11 +906,24 @@ struct mstudio_meshvertexdata_t
 	mstudiovertex_t		*Vertex( int i ) const;
 	bool				HasTangentData( void ) const;
 
-	// indirection to this mesh's model's vertex data
 	const mstudio_modelvertexdata_t	*modelvertexdata;
+	int					numLODVertexes[MAX_NUM_LODS];
+	const mstudiomesh_t *meshptr;
+};
 
-	// used for fixup calcs when culling top level lods
-	// expected number of mesh verts at desired lod
+// On-disk stubs — preserve the 32-bit MDL file layout regardless of host
+// bitness. Placeholders are zeroed by studiomdl; the engine overwrites the
+// pointer slot at load time. numLODVertexes is real data that studiomdl
+// writes and the engine reads.
+struct mstudio_modelvertexdata_filestub_t
+{
+	int32_t				_pVertexData_placeholder;
+	int32_t				_pTangentData_placeholder;
+};
+
+struct mstudio_meshvertexdata_filestub_t
+{
+	int32_t				_modelvertexdata_placeholder;
 	int					numLODVertexes[MAX_NUM_LODS];
 };
 
@@ -925,7 +952,7 @@ struct mstudiomesh_t
 
 	Vector				center;
 
-	mstudio_meshvertexdata_t vertexdata;
+	mstudio_meshvertexdata_filestub_t vertexdata;
 
 	int					unused[8]; // remove as appropriate
 
@@ -962,38 +989,36 @@ struct mstudiomodel_t
 	int					eyeballindex;
 	inline  mstudioeyeball_t *pEyeball( int i ) { return (mstudioeyeball_t *)(((byte *)this) + eyeballindex) + i; };
 
-	mstudio_modelvertexdata_t vertexdata;
+	mstudio_modelvertexdata_filestub_t vertexdata;
 
 	int					unused[8];		// remove as appropriate
 };
 
-inline bool mstudio_modelvertexdata_t::HasTangentData( void ) const 
+inline bool mstudio_modelvertexdata_t::HasTangentData( void ) const
 {
 	return (pTangentData != NULL);
 }
 
-inline mstudiovertex_t *mstudio_modelvertexdata_t::Vertex( int i ) const 
-{ 
-	mstudiomodel_t *modelptr = (mstudiomodel_t *)((byte *)this - offsetof(mstudiomodel_t,vertexdata)); 	
+inline mstudiovertex_t *mstudio_modelvertexdata_t::Vertex( int i ) const
+{
 	return (mstudiovertex_t *)((byte *)pVertexData + modelptr->vertexindex) + i;
 }
 
-inline Vector *mstudio_modelvertexdata_t::Position( int i ) const 
+inline Vector *mstudio_modelvertexdata_t::Position( int i ) const
 {
 	return &Vertex(i)->m_vecPosition;
 }
 
-inline Vector *mstudio_modelvertexdata_t::Normal( int i ) const 
-{ 
+inline Vector *mstudio_modelvertexdata_t::Normal( int i ) const
+{
 	return &Vertex(i)->m_vecNormal;
 }
 
-inline Vector4D *mstudio_modelvertexdata_t::TangentS( int i ) const 
+inline Vector4D *mstudio_modelvertexdata_t::TangentS( int i ) const
 {
 	// NOTE: The tangents vector is 16-bytes in a separate array
 	// because it only exists on the high end, and if I leave it out
 	// of the mstudiovertex_t, the vertex is 64-bytes (good for low end)
-	mstudiomodel_t *modelptr = (mstudiomodel_t *)((byte *)this - offsetof(mstudiomodel_t,vertexdata)); 
 	return (Vector4D *)((byte *)pTangentData + modelptr->tangentsindex) + i;
 }
 
@@ -1019,45 +1044,44 @@ inline bool mstudio_meshvertexdata_t::HasTangentData( void ) const
 
 inline const mstudio_meshvertexdata_t *mstudiomesh_t::GetVertexData()
 {
-	// get this mesh's model's vertex data
-	vertexdata.modelvertexdata = this->pModel()->GetVertexData();
-
-	return &vertexdata;
+	// A runtime view — real pointers live here, not on disk. Static is fine
+	// because studiomdl is single-threaded and processes one mesh at a time
+	// through these methods.
+	static mstudio_meshvertexdata_t rt;
+	rt.modelvertexdata = this->pModel()->GetVertexData();
+	for ( int i = 0; i < MAX_NUM_LODS; i++ )
+		rt.numLODVertexes[i] = this->vertexdata.numLODVertexes[i];
+	rt.meshptr = this;
+	return &rt;
 }
 
-inline Vector *mstudio_meshvertexdata_t::Position( int i ) const 
-{  
-	mstudiomesh_t *meshptr = (mstudiomesh_t *)((byte *)this - offsetof(mstudiomesh_t,vertexdata)); 
-	return modelvertexdata->Position( meshptr->vertexoffset + i ); 
+inline Vector *mstudio_meshvertexdata_t::Position( int i ) const
+{
+	return modelvertexdata->Position( meshptr->vertexoffset + i );
 };
 
-inline Vector *mstudio_meshvertexdata_t::Normal( int i ) const 
-{ 
-	mstudiomesh_t *meshptr = (mstudiomesh_t *)((byte *)this - offsetof(mstudiomesh_t,vertexdata)); 
-	return modelvertexdata->Normal( meshptr->vertexoffset + i ); 
+inline Vector *mstudio_meshvertexdata_t::Normal( int i ) const
+{
+	return modelvertexdata->Normal( meshptr->vertexoffset + i );
 };
 
 inline Vector4D *mstudio_meshvertexdata_t::TangentS( int i ) const
 {
-	mstudiomesh_t *meshptr = (mstudiomesh_t *)((byte *)this - offsetof(mstudiomesh_t,vertexdata)); 
-	return modelvertexdata->TangentS( meshptr->vertexoffset + i ); 
+	return modelvertexdata->TangentS( meshptr->vertexoffset + i );
 }
 
-inline Vector2D *mstudio_meshvertexdata_t::Texcoord( int i ) const 
-{ 
-	mstudiomesh_t *meshptr = (mstudiomesh_t *)((byte *)this - offsetof(mstudiomesh_t,vertexdata)); 
-	return modelvertexdata->Texcoord( meshptr->vertexoffset + i ); 
+inline Vector2D *mstudio_meshvertexdata_t::Texcoord( int i ) const
+{
+	return modelvertexdata->Texcoord( meshptr->vertexoffset + i );
 };
 
-inline mstudioboneweight_t *mstudio_meshvertexdata_t::BoneWeights( int i ) const 
-{ 
-	mstudiomesh_t *meshptr = (mstudiomesh_t *)((byte *)this - offsetof(mstudiomesh_t,vertexdata)); 
-	return modelvertexdata->BoneWeights( meshptr->vertexoffset + i ); 
+inline mstudioboneweight_t *mstudio_meshvertexdata_t::BoneWeights( int i ) const
+{
+	return modelvertexdata->BoneWeights( meshptr->vertexoffset + i );
 };
 
 inline mstudiovertex_t *mstudio_meshvertexdata_t::Vertex( int i ) const
 {
-	mstudiomesh_t *meshptr = (mstudiomesh_t *)((byte *)this - offsetof(mstudiomesh_t,vertexdata)); 
 	return modelvertexdata->Vertex( meshptr->vertexoffset + i );
 }
 
@@ -1521,26 +1545,30 @@ struct studiohdr_t
 	// implementation specific call to get a named model
 	const studiohdr_t	*FindModel( void **cache, char const *modelname ) const;
 
-	// implementation specific back pointer to virtual data
-	mutable void		*virtualModel;
+	// 4-byte placeholder on disk. Source 1 engine (32-bit) re-populates this
+	// at load time; studiomdl never touches it. Storing as int32_t keeps the
+	// .mdl file layout identical between 32- and 64-bit builds.
+	int32_t				virtualModel_placeholder;
 	virtualmodel_t		*GetVirtualModel( void ) const;
 
 	// for demand loaded animation blocks
-	int					szanimblocknameindex;	
+	int					szanimblocknameindex;
 	inline char * const pszAnimBlockName( void ) const { return ((char *)this) + szanimblocknameindex; }
 	int					numanimblocks;
 	int					animblockindex;
 	inline mstudioanimblock_t *pAnimBlock( int i ) const { Assert( i > 0 && i < numanimblocks); return (mstudioanimblock_t *)(((byte *)this) + animblockindex) + i; };
-	mutable void		*animblockModel;
+	int32_t				animblockModel_placeholder;
 	byte *				GetAnimBlock( int i ) const;
 
 	int					bonetablebynameindex;
 	inline const byte	*GetBoneTableSortedByName() const { return (byte *)this + bonetablebynameindex; }
 
-	// used by tools only that don't cache, but persist mdl's peer data
-	// engine uses virtualModel to back link to cache pointers
-	void				*pVertexBase;
-	void				*pIndexBase;
+	// used by tools only that don't cache, but persist mdl's peer data.
+	// 4-byte placeholders — the engine writes real pointers into these
+	// fields at runtime, but on disk they must be 32-bit to keep the layout
+	// stable across 32/64-bit studiomdl builds.
+	int32_t				pVertexBase_placeholder;
+	int32_t				pIndexBase_placeholder;
 
 	// if STUDIOHDR_FLAGS_CONSTANT_DIRECTIONAL_LIGHT_DOT is set,
 	// this value is used to calculate directional components of lighting 

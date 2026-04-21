@@ -1890,7 +1890,7 @@ void LoadMaterials( studiohdr_t *phdr )
                 for ( int i = 0; i < phdr->numtextures; ++i )
                 {
                         phdr->pTexture( i )->used = 1;
-                        phdr->pTexture( i )->material = NULL;
+                        phdr->pTexture( i )->material_placeholder = 0;
                 }
                 return;
         }
@@ -1923,7 +1923,10 @@ void LoadMaterials( studiohdr_t *phdr )
 				}
 			}
 
-			phdr->pTexture( i )->material = pMaterial;
+			// On-disk slot is a 32-bit placeholder. The engine overwrites it
+			// with its own IMaterial pointer at load time. Drop the pMaterial
+			// we just resolved — it would truncate on 64-bit anyway.
+			phdr->pTexture( i )->material_placeholder = 0;
 
 			// FIXME: hack, needs proper client side material system interface
 			bool found = false;
@@ -2262,8 +2265,12 @@ void WriteModelFiles(void)
 
 const mstudio_modelvertexdata_t *mstudiomodel_t::GetVertexData()
 {
-	static vertexFileHeader_t	*pVertexHdr;
-	char						filename[260];
+	static vertexFileHeader_t		*pVertexHdr;
+	// Runtime view with real pointers. Not embedded in mstudiomodel_t —
+	// that struct holds a 32-bit on-disk placeholder (see studio.h) to keep
+	// the .mdl layout stable across 32/64-bit studiomdl builds.
+	static mstudio_modelvertexdata_t runtimeVertexData;
+	char							filename[260];
 
 	if (pVertexHdr)
 	{
@@ -2277,9 +2284,9 @@ const mstudio_modelvertexdata_t *mstudiomodel_t::GetVertexData()
 //	{
 //		strcat( filename, "platform_" );
 //		strcat( filename, g_pPlatformName );
-//		strcat( filename, "/" );	
+//		strcat( filename, "/" );
 //	}
-	strcat( filename, "models/" );	
+	strcat( filename, "models/" );
 	strcat( filename, outname );
 	Q_StripExtension( filename, filename, sizeof( filename ) );
 	strcat( filename, ".vvd" );
@@ -2299,10 +2306,11 @@ const mstudio_modelvertexdata_t *mstudiomodel_t::GetVertexData()
 	}
 
 hasData:
-	vertexdata.pVertexData  = (byte *)pVertexHdr + pVertexHdr->vertexDataStart;
-	vertexdata.pTangentData = (byte *)pVertexHdr + pVertexHdr->tangentDataStart;
+	runtimeVertexData.pVertexData  = (byte *)pVertexHdr + pVertexHdr->vertexDataStart;
+	runtimeVertexData.pTangentData = (byte *)pVertexHdr + pVertexHdr->tangentDataStart;
+	runtimeVertexData.modelptr     = this;
 
-	return &vertexdata;
+	return &runtimeVertexData;
 }
 
 typedef struct
