@@ -39,3 +39,4 @@ CMakePresets.json.user
 # OS junk
 .DS_Store
 Thumbs.db
+Testing/
