@@ -61,6 +61,11 @@ studiomdl <path/to/model.qc> -game <path/to/moddir>
 
 `-game` must point to the directory that contains `gameinfo.txt`.
 
+Useful flags (in addition to stock `studiomdl` options):
+
+- `-nosw` — skip writing `.sw.vtx` (software-renderer LOD, unused by modern Source games)
+- `-noxbox` — skip writing `.xbox.vtx` (original Xbox LOD)
+
 ## Notes
 
 ### vphysics (collision compilation)

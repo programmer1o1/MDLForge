@@ -3929,6 +3929,7 @@ void WriteOptimizedFiles( studiohdr_t *phdr, s_bodypart_t *pSrcBodyParts )
 	Q_StripExtension( filename, filename, sizeof( filename ) );
 
 	// if ( !g_bXbox )
+	if ( !g_bSkipSoftwareVtx )
 	{
 		strcpy( tmpFileName, filename );
 		strcat( tmpFileName, ".sw.vtx" );
@@ -3944,6 +3945,8 @@ void WriteOptimizedFiles( studiohdr_t *phdr, s_bodypart_t *pSrcBodyParts )
 												3*3,		// bones/tri
 												512,	// bones/strip
 												tmpFileName, glViewFilename );
+	}
+	{
 
 		strcpy( tmpFileName, filename );
 		strcat( tmpFileName, ".dx80.vtx" );
@@ -3974,18 +3977,19 @@ void WriteOptimizedFiles( studiohdr_t *phdr, s_bodypart_t *pSrcBodyParts )
 												tmpFileName, glViewFilename );
 	}
 	// else
+	if ( !g_bSkipXboxVtx )
 	{
 		strcpy( tmpFileName, filename );
 		strcat( tmpFileName, ".xbox.vtx" );
 		strcpy( glViewFilename, filename );
 		strcat( glViewFilename, ".xbox.glview" );
 		s_OptimizedModel.OptimizeFromStudioHdr( phdr, pSrcBodyParts,
-												24 /* vert cache size (real size, not effective!)*/, 
+												24 /* vert cache size (real size, not effective!)*/,
 												false, /* doesn't use fixed function */
 												false, // don't force software skinning
 												true, // Allow hardware flex
-												3  /* bones/vert */, 
-												9  /* bones/tri */, 
+												3  /* bones/vert */,
+												9  /* bones/tri */,
 												47  /* bones/strip */,
 												tmpFileName, glViewFilename );
 	}

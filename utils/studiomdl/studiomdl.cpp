@@ -60,6 +60,8 @@ bool g_bUseBoneInBBox = true;
 bool g_bLockBoneLengths = false;
 bool g_bOverridePreDefinedBones = true;
 bool g_bXbox = false;
+bool g_bSkipSoftwareVtx = false;
+bool g_bSkipXboxVtx = false;
 int g_minLod = 0;
 bool g_bNoWarnings = false;
 
@@ -6867,6 +6869,8 @@ void UsageAndExit()
 		"[-t <texture>]\n"
 		"[-xbox] - enable xbox processing(default)\n"
 		"[-notxbox] - disable xbox processing\n"
+		"[-noxbox] - skip writing .xbox.vtx\n"
+		"[-nosw] - skip writing .sw.vtx (software renderer)\n"
 		"[-nowarnings] - disable warnings\n"
 		);
 }
@@ -7048,6 +7052,23 @@ int main (int argc, char **argv)
 			{
 				g_bXbox  = false;
 				g_minLod = 0;
+				continue;
+			}
+
+			if (!stricmp(argv[i], "-noxbox"))
+			{
+				// Skip generating the .xbox.vtx output. The modern Source
+				// engines Gmod/CSGO/etc. don't load it; it's only there
+				// for the original Xbox build path.
+				g_bSkipXboxVtx = true;
+				continue;
+			}
+
+			if (!stricmp(argv[i], "-nosw"))
+			{
+				// Skip generating the .sw.vtx output. The software
+				// renderer hasn't shipped in any modern Source title.
+				g_bSkipSoftwareVtx = true;
 				continue;
 			}
 

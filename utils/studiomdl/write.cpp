@@ -3197,6 +3197,12 @@ bool FixupToSortedLODVertexes(studiohdr_t *pStudioHdr)
 
 	for (i=0; i<ARRAYSIZE(vtxPrefixes); i++)
 	{
+		// Skip fixup for VTX variants whose generation was suppressed — the
+		// file on disk won't exist for these and FixupVTXFile would fail.
+		if ( g_bSkipSoftwareVtx && !stricmp( vtxPrefixes[i], ".sw.vtx" ) )
+			continue;
+		if ( g_bSkipXboxVtx && !stricmp( vtxPrefixes[i], ".xbox.vtx" ) )
+			continue;
 		// fixup ???.vtx
 		strcpy( tmpFileName, filename );
 		strcat( tmpFileName, vtxPrefixes[i] );

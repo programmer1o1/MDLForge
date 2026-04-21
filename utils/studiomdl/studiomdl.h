@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -1334,6 +1334,8 @@ extern bool g_bUseBoneInBBox;
 extern bool g_bLockBoneLengths;
 extern bool g_bOverridePreDefinedBones;
 extern bool g_bXbox;
+extern bool g_bSkipSoftwareVtx;
+extern bool g_bSkipXboxVtx;
 extern int g_minLod;
 
 EXTERN int g_numcollapse;
