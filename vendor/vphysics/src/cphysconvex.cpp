@@ -283,6 +283,32 @@ CPhysConvex_Impl *CPhysConvex_Impl::BuildFromVerts( Vector **ppVerts, int vertCo
 	for ( size_t idx : ib )
 		c->triangles.push_back( static_cast<uint16_t>( idx ) );
 
+	// Normalize winding so every triangle's outward normal points AWAY from
+	// the hull's centroid. IVP's collision detection treats the triangles
+	// as oriented surfaces — if the winding is flipped, the engine thinks
+	// the solid region is everywhere outside the hull and collision tests
+	// pass straight through. quickhull's `CCW=true` is relative to whichever
+	// face the algorithm picks first, which in practice can come out either
+	// way depending on input point order; we rewind here from first
+	// principles.
+	{
+		Vector centroid( 0.0f, 0.0f, 0.0f );
+		for ( const Vector &p : c->points )
+			centroid += p;
+		centroid /= static_cast<float>( c->points.size() );
+		for ( size_t t = 0; t + 2 < c->triangles.size(); t += 3 )
+		{
+			const Vector &a = c->points[ c->triangles[t + 0] ];
+			const Vector &b = c->points[ c->triangles[t + 1] ];
+			const Vector &dd = c->points[ c->triangles[t + 2] ];
+			// Triangle normal × (triangle-vertex - centroid). If the normal
+			// points inward, swap two indices to flip it outward.
+			const Vector n = CrossProduct( b - a, dd - a );
+			if ( DotProduct( n, a - centroid ) < 0.0f )
+				std::swap( c->triangles[t + 1], c->triangles[t + 2] );
+		}
+	}
+
 	c->RecomputeDerived();
 	return c;
 }
