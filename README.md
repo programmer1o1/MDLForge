@@ -4,7 +4,7 @@ Standalone, cross-platform build of `studiomdl` with minimal runtime dependencie
 
 ## Build
 
-### Windows (recommended)
+### Windows
 
 Requirements: CMake 3.16+ and Visual Studio.
 
@@ -15,11 +15,9 @@ cmake --build build --config Release
 
 Output: `build/utils/studiomdl/Release/studiomdl.exe`
 
-This project defaults to **32-bit** builds (`STUDIOMDL_REQUIRE_32BIT=ON`) because Source 1 toolchain modules (notably `vphysics`) are typically 32-bit.
+Defaults to **32-bit** (`STUDIOMDL_REQUIRE_32BIT=ON`) on Windows. Pass `-DSTUDIOMDL_REQUIRE_32BIT=OFF` and `-A x64` for a 64-bit build — output is fully compatible with Source engines either way.
 
-To try a 64-bit build, pass `-DSTUDIOMDL_REQUIRE_32BIT=OFF` and select an x64 toolchain (for example, `-A x64` with Visual Studio generators).
-
-On MSVC, you can also pass `-DSTUDIOMDL_MSVC_STATIC_RUNTIME=ON` to link the runtime statically for easier redistribution.
+`-DSTUDIOMDL_MSVC_STATIC_RUNTIME=ON` links the MSVC runtime statically for redistribution.
 
 ### Linux / macOS
 
@@ -30,7 +28,15 @@ cmake -S . -B build -DSTUDIOMDL_REQUIRE_32BIT=OFF
 cmake --build build
 ```
 
-For Source 1 `vphysics` compatibility you will generally need a 32-bit toolchain (`-m32`) and 32-bit system dependencies.
+64-bit builds produce on-disk MDL/VVD/VTX/PHY files that match Source's 32-bit layout exactly — pointer fields in the on-disk structs are pinned to 32 bits regardless of host bitness, so a 64-bit `studiomdl` on Linux or macOS produces files the (32-bit) Source engine loads correctly.
+
+On Apple Silicon Macs, build for x86_64 and run under Rosetta:
+
+```sh
+cmake -S . -B build -DSTUDIOMDL_REQUIRE_32BIT=OFF -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build
+arch -x86_64 build/utils/studiomdl/studiomdl <args>
+```
 
 ### CI
 
@@ -64,7 +70,8 @@ studiomdl <path/to/model.qc> -game <path/to/moddir>
 The bundled module:
 
 - Is enabled by default via `-DMDLFORGE_BUILD_VPHYSICS=ON`. Set `OFF` to skip it if you want to provide your own `libvphysics.{so,dylib,dll}`.
-- Produces `.phy` files that are structurally compatible with Valve's format (VPHY/IVPS magic, correct compact-surface + ledgetree + compactledge layout). Byte-for-byte equivalence with Valve's output is **not** a goal — convex-hull ordering and LOD/drag fields differ — but Source games should load the output without issue for all typical collision shapes. Competitive-precision use cases (surf/bhop movement servers) may notice small differences in convex silhouettes.
+- Produces `.phy` files that match Valve's stock output field-by-field on well-authored physics meshes. Validated against shipped reference models — per-solid `massCenter`, `upperLimitRadius`, ledgetree node bounds, and compact-surface/ledge layout all agree to four decimals. The only typical deltas are convex-hull triangulation order (akuukka/quickhull vs. Qhull pick different diagonals on coplanar groups) and LOD/drag-axis fields that aren't load-bearing for in-game collision.
+- Implements the IVP wire format correctly: inches→meters scaling, Source→IVP axis remap (`(x,y,z)→(x,-z,y)`, a +90° rotation about X), 16-byte-aligned ledge layout (ledges before tree nodes), volume-weighted centroid via tetrahedral decomposition, and an outlier-vertex filter that drops cross-bone strays.
 - Uses [akuukka/quickhull](https://github.com/akuukka/quickhull) (public domain) for convex hull construction.
 
 The loader (`utils/common/physdll.cpp`) probes per-OS filenames:
@@ -73,7 +80,7 @@ The loader (`utils/common/physdll.cpp`) probes per-OS filenames:
 - Linux: `libvphysics.so`, `vphysics.so`
 - macOS: `libvphysics.dylib`, `vphysics.dylib`
 
-Search order remains: bare filename (standard loader paths) → `<gamedir>/bin/` → `<gameroot>/bin/`. To use a user-supplied vphysics instead of the bundled one, drop it into any of those locations — the first found wins.
+Search order: `<exe_dir>/` → `<exe_dir>/bin/` → bare filename (standard loader paths) → `<gamedir>/bin/` → `<gameroot>/bin/`. The exe-dir probe (resolved via `_NSGetExecutablePath` on macOS, `/proc/self/exe` on Linux) is what makes co-located `libvphysics.*` work without setting `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH`. To use a user-supplied vphysics instead of the bundled one, drop it into any of those locations — the first found wins.
 
 ### Tests
 
