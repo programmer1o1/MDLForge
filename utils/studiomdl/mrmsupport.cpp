@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -32,9 +32,15 @@
 
 bool IsEnd( char const* pLine )
 {
-	if (strncmp( "end", pLine, 3 ) != 0) 
+	if (strncmp( "end", pLine, 3 ) != 0)
 		return false;
-	return (pLine[3] == '\0') || (pLine[3] == '\n');
+	// Accept bare "end", "end\n", "end\r\n" (CRLF from Windows/Crowbar-authored
+	// SMDs), and "end\r". POSIX fopen("r") does not translate CRLF, so a naive
+	// pLine[3] == '\n' check misleadingly fails on SMDs written with Windows
+	// line endings â€” the parser then treats "end\r" as a texture name and
+	// crashes on the next fgets.
+	char c = pLine[3];
+	return c == '\0' || c == '\n' || c == '\r';
 }
 
 

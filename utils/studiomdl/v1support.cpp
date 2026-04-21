@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -77,13 +77,17 @@ void ParseFaceData( s_source_t *psource, int material, s_face_t *pFace )
 	float   weights[MAXSTUDIOSRCBONES];
 	int bone;
 
-	for (j = 0; j < 3; j++) 
+	for (j = 0; j < 3; j++)
 	{
 		memset( g_szLine, 0, sizeof( g_szLine ) );
 
-		if (fgets( g_szLine, sizeof( g_szLine ), g_fpInput ) == NULL) 
+		if (fgets( g_szLine, sizeof( g_szLine ), g_fpInput ) == NULL)
 		{
-			MdlError("%s: error on g_szLine %d: %s", g_szFilename, g_iLinecount, g_szLine );
+			MdlError(
+				"%s: unexpected EOF at line %d while reading vertex %d/3 of a triangle.\n"
+				"  This usually means the 'triangles' section is missing an 'end' marker,\n"
+				"  or the SMD was written with non-LF line endings that confused the parser.\n",
+				g_szFilename, g_iLinecount, j + 1 );
 		}
 
 		iCount = 0;
