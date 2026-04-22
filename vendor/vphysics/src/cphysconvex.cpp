@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <unordered_map>
 
 namespace mdlforge_vphysics
@@ -169,39 +170,123 @@ void ComputeAABB( const std::vector<Vector> &pts, Vector &outMin, Vector &outMax
 	}
 }
 
-// Build the half-edge → opposite-half-edge map for a closed convex hull.
-// Each triangle contributes three directed half-edges (a→b, b→c, c→a). In
-// a closed manifold, every half-edge (a→b) is matched by exactly one
-// half-edge (b→a) in an adjacent triangle. IVP stores the linear index
-// (tri*3 + slot) of that twin inside each compact edge's opposite_index
-// field — without it, the engine can't walk across triangle boundaries
-// during contact resolution and the rigid body tunnels through surfaces.
-std::vector<uint16_t> BuildOppositeEdges( const std::vector<uint16_t> &tris )
+// For each triangle, find the index of the triangle on the far side of the
+// hull: the one that a ray cast from this triangle's centroid along its
+// inward normal exits through. IVP pairs this with opposite_index during
+// penetration-depth queries — the walker starts at the contact face,
+// jumps to the pierce face to bracket the depth, and only then consults
+// adjacency to refine. With both populated the query terminates; with
+// only adjacency it loops forever.
+//
+// Implementation: Möller–Trumbore ray-triangle intersection in a
+// double-loop over triangles. O(N²) per convex, ~2500 tests for a
+// typical 50-triangle ragdoll hull — negligible. Falls back to the
+// triangle itself if no other face is hit (shouldn't happen on a
+// closed convex hull; defensive).
+std::vector<uint16_t> BuildPierceIndices( const std::vector<Vector> &pts,
+                                          const std::vector<uint16_t> &tris )
 {
-	const size_t nEdges = tris.size();
-	std::vector<uint16_t> opp( nEdges, 0 );
-	// Key = (from_vertex << 16) | to_vertex. Value = linear edge index.
-	std::unordered_map<uint32_t, uint16_t> halfEdges;
-	halfEdges.reserve( nEdges );
-	for ( size_t t = 0; t + 2 < nEdges; t += 3 )
+	const size_t nTri = tris.size() / 3;
+	std::vector<uint16_t> pierce( nTri, 0 );
+	for ( size_t t = 0; t < nTri; ++t )
 	{
+		const Vector &a = pts[ tris[t * 3 + 0] ];
+		const Vector &b = pts[ tris[t * 3 + 1] ];
+		const Vector &c = pts[ tris[t * 3 + 2] ];
+		const Vector centroid = ( a + b + c ) * ( 1.0f / 3.0f );
+		Vector normal = CrossProduct( b - a, c - a );
+		const float nLen = normal.Length();
+		if ( nLen < 1e-6f ) { pierce[t] = static_cast<uint16_t>( t ); continue; }
+		normal /= nLen;
+		// Ray shoots inward from centroid along -normal.
+		const Vector rayOrig = centroid;
+		const Vector rayDir  = -normal;
+
+		float bestDist = std::numeric_limits<float>::infinity();
+		size_t bestTri = t;
+		for ( size_t u = 0; u < nTri; ++u )
+		{
+			if ( u == t ) continue;
+			const Vector &u0 = pts[ tris[u * 3 + 0] ];
+			const Vector &u1 = pts[ tris[u * 3 + 1] ];
+			const Vector &u2 = pts[ tris[u * 3 + 2] ];
+			const Vector e1 = u1 - u0;
+			const Vector e2 = u2 - u0;
+			const Vector h  = CrossProduct( rayDir, e2 );
+			const float det = DotProduct( e1, h );
+			if ( std::fabs( det ) < 1e-8f ) continue;
+			const float invDet = 1.0f / det;
+			const Vector s = rayOrig - u0;
+			const float bary_u = invDet * DotProduct( s, h );
+			if ( bary_u < 0.0f || bary_u > 1.0f ) continue;
+			const Vector q = CrossProduct( s, e1 );
+			const float bary_v = invDet * DotProduct( rayDir, q );
+			if ( bary_v < 0.0f || bary_u + bary_v > 1.0f ) continue;
+			const float dist = invDet * DotProduct( e2, q );
+			if ( dist > 1e-5f && dist < bestDist )
+			{
+				bestDist = dist;
+				bestTri  = u;
+			}
+		}
+		pierce[t] = static_cast<uint16_t>( bestTri );
+	}
+	return pierce;
+}
+
+// Build the opposite-edge table for a closed convex hull.
+//
+// IVP's IVPCompactTriangle occupies 16 bytes on disk: a 4-byte triangle
+// header followed by three 4-byte edges. The compact_edge.opposite_index
+// field is a 15-bit *signed offset* measured in 4-byte slots, not a linear
+// edge index. Given a triangle array laid out [hdr|e0|e1|e2|hdr|e0|e1|e2|...]
+// where each slot is 4 bytes, the slot-index of edge (t, e) is `4*t + 1 + e`.
+// For each half-edge (a,b) its twin (b,a) lives in a neighbouring triangle;
+// the stored `opposite_index` is `slot(twin) - slot(self)`, and the value
+// stored in the twin is the negation.
+//
+// Returns a parallel array indexed exactly like `triangles` (3 entries per
+// triangle), where each element is the raw int16 value to be packed into
+// the edge's `opposite_index` field.
+std::vector<int16_t> BuildOppositeEdgeOffsets( const std::vector<uint16_t> &tris )
+{
+	const size_t nHalf = tris.size();              // 3 * triangle count
+	std::vector<int16_t> opp( nHalf, 0 );
+	// 4-byte slot index of the edge belonging to triangle `triIdx`, slot
+	// `edgeSlot` (0..2). On-disk layout is [hdr|e0|e1|e2] per triangle —
+	// hdr occupies slot 0 of each 4-slot triangle block, edges occupy 1..3.
+	auto slotOf = []( size_t triIdx, size_t edgeSlot ) {
+		return 4 * triIdx + 1 + edgeSlot;
+	};
+	std::unordered_map<uint32_t, size_t> halfEdges;
+	halfEdges.reserve( nHalf );
+	for ( size_t t = 0; t + 2 < nHalf; t += 3 )
+	{
+		const size_t triIdx = t / 3;
 		for ( size_t e = 0; e < 3; ++e )
 		{
 			const uint16_t from = tris[t + e];
 			const uint16_t to   = tris[t + ( ( e + 1 ) % 3 )];
-			const uint32_t key  = ( static_cast<uint32_t>( from ) << 16 ) | to;
-			halfEdges[ key ] = static_cast<uint16_t>( t + e );
+			halfEdges[ ( static_cast<uint32_t>( from ) << 16 ) | to ] = slotOf( triIdx, e );
 		}
 	}
-	for ( size_t t = 0; t + 2 < nEdges; t += 3 )
+	for ( size_t t = 0; t + 2 < nHalf; t += 3 )
 	{
+		const size_t triIdx = t / 3;
 		for ( size_t e = 0; e < 3; ++e )
 		{
 			const uint16_t from = tris[t + e];
 			const uint16_t to   = tris[t + ( ( e + 1 ) % 3 )];
 			const uint32_t twinKey = ( static_cast<uint32_t>( to ) << 16 ) | from;
 			auto it = halfEdges.find( twinKey );
-			opp[t + e] = ( it != halfEdges.end() ) ? it->second : static_cast<uint16_t>( t + e );
+			if ( it == halfEdges.end() )
+			{
+				opp[t + e] = 0;  // unmatched; shouldn't happen on a closed hull
+				continue;
+			}
+			const long selfSlot = static_cast<long>( slotOf( triIdx, e ) );
+			const long twinSlot = static_cast<long>( it->second );
+			opp[t + e] = static_cast<int16_t>( twinSlot - selfSlot );
 		}
 	}
 	return opp;
@@ -276,7 +361,8 @@ void CPhysConvex_Impl::RecomputeDerived()
 	ComputeInertiaDiagonal(
 		points, triangles, centroid, volume,
 		inertiaDiag.x, inertiaDiag.y, inertiaDiag.z );
-	oppositeEdges = BuildOppositeEdges( triangles );
+	oppositeEdges = BuildOppositeEdgeOffsets( triangles );
+	pierceIndices = BuildPierceIndices( points, triangles );
 }
 
 CPhysConvex_Impl *CPhysConvex_Impl::BuildFromVerts( Vector **ppVerts, int vertCount )
@@ -323,29 +409,31 @@ CPhysConvex_Impl *CPhysConvex_Impl::BuildFromVerts( Vector **ppVerts, int vertCo
 	for ( size_t idx : ib )
 		c->triangles.push_back( static_cast<uint16_t>( idx ) );
 
-	// Normalize winding so every triangle's outward normal points AWAY from
-	// the hull's centroid. IVP's collision detection treats the triangles
-	// as oriented surfaces — if the winding is flipped, the engine thinks
-	// the solid region is everywhere outside the hull and collision tests
-	// pass straight through. quickhull's `CCW=true` is relative to whichever
-	// face the algorithm picks first, which in practice can come out either
-	// way depending on input point order; we rewind here from first
-	// principles.
+	// Quickhull emits a *globally consistent* winding but its orientation
+	// (CCW-from-outside vs CCW-from-inside) depends on input-point order
+	// and isn't guaranteed to match IVP's convention. We want every
+	// triangle's outward normal to point away from the hull centroid.
+	// Detect the orientation once using the signed sum of tet volumes
+	// from origin: for consistent CCW-from-outside winding, the signed
+	// sum is positive; for the inverted case it's negative. Flip every
+	// triangle in lockstep if needed — this keeps the half-edge graph
+	// self-consistent (every (a→b) still matches exactly one (b→a)),
+	// unlike the per-triangle rewind we tried earlier.
 	{
-		Vector centroid( 0.0f, 0.0f, 0.0f );
-		for ( const Vector &p : c->points )
-			centroid += p;
-		centroid /= static_cast<float>( c->points.size() );
-		for ( size_t t = 0; t + 2 < c->triangles.size(); t += 3 )
+		double sixV = 0.0;
+		for ( size_t i = 0; i + 2 < c->triangles.size(); i += 3 )
 		{
-			const Vector &a = c->points[ c->triangles[t + 0] ];
-			const Vector &b = c->points[ c->triangles[t + 1] ];
-			const Vector &dd = c->points[ c->triangles[t + 2] ];
-			// Triangle normal × (triangle-vertex - centroid). If the normal
-			// points inward, swap two indices to flip it outward.
-			const Vector n = CrossProduct( b - a, dd - a );
-			if ( DotProduct( n, a - centroid ) < 0.0f )
-				std::swap( c->triangles[t + 1], c->triangles[t + 2] );
+			const Vector &a = c->points[ c->triangles[i + 0] ];
+			const Vector &b = c->points[ c->triangles[i + 1] ];
+			const Vector &d = c->points[ c->triangles[i + 2] ];
+			sixV += (double) a.x * ( (double) b.y * d.z - (double) b.z * d.y ) +
+			        (double) a.y * ( (double) b.z * d.x - (double) b.x * d.z ) +
+			        (double) a.z * ( (double) b.x * d.y - (double) b.y * d.x );
+		}
+		if ( sixV < 0.0 )
+		{
+			for ( size_t i = 0; i + 2 < c->triangles.size(); i += 3 )
+				std::swap( c->triangles[i + 1], c->triangles[i + 2] );
 		}
 	}
 

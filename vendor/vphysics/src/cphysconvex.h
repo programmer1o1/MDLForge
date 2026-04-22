@@ -23,7 +23,19 @@ public:
 	// these to traverse the hull during collision resolution; without
 	// them, contacts that span triangle boundaries fail and the rigid
 	// body partially penetrates surfaces.
-	std::vector<uint16_t> oppositeEdges;
+	// Per-edge signed 15-bit value destined for IVP's compact_edge
+	// opposite_index field: the distance (in 4-byte slot units) from this
+	// edge to its twin half-edge in an adjacent triangle. See
+	// BuildOppositeEdgeOffsets in cphysconvex.cpp for the exact layout
+	// convention.
+	std::vector<int16_t>  oppositeEdges;
+	// Per-triangle "pierce" index: for triangle T, the index of the
+	// triangle on the far side of the hull that a ray from T's centroid
+	// along T's inward normal exits through. IVP uses this during
+	// penetration-depth queries to walk from the contact face to the
+	// opposite hull face; the query loops forever when it's unset (zero)
+	// and adjacency is populated.
+	std::vector<uint16_t> pierceIndices;
 	Vector                aabbMin{ 0.0f, 0.0f, 0.0f };
 	Vector                aabbMax{ 0.0f, 0.0f, 0.0f };
 	// True volume-weighted centroid — matches what Valve's vphysics uses for

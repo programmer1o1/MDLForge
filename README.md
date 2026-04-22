@@ -70,13 +70,15 @@ Useful flags (in addition to stock `studiomdl` options):
 
 ### vphysics (collision compilation)
 
-`$collisionjoints`/`$collisionmodel` compilation requires an `IPhysicsCollision` / `IPhysicsSurfaceProps` implementation loadable at runtime. MDLForge ships a bundled clean-room module under `vendor/vphysics/` that builds on all three platforms and is placed next to the `studiomdl` binary so the loader finds it automatically. No leaked Valve source is used; the implementation is MIT-licensed.
+`$collisionjoints`/`$collisionmodel` compilation requires an `IPhysicsCollision` / `IPhysicsSurfaceProps` implementation loadable at runtime. MDLForge ships a bundled module under `vendor/vphysics/` that builds on all three platforms and is placed next to the `studiomdl` binary so the loader finds it automatically.
+
+**Origin and licensing.** The implementation is MIT-licensed. Most of it (format structures, volume / centroid / inertia math, axis remap, ledge layout, half-edge graph construction) was developed clean-room from public IVP format documentation and Valve's public SDK headers. The specific convention for IVP's `compact_edge.opposite_index` field — a signed offset in 4-byte slot units, *not* a linear edge index — was derived by reading `nillerusr/source-engine`'s vphysics tree as a format reference; the code here is original but the bit-level format choice was confirmed against that reference. All collision logic, ray-casts, and data flow are our own code.
 
 The bundled module:
 
 - Is enabled by default via `-DMDLFORGE_BUILD_VPHYSICS=ON`. Set `OFF` to skip it if you want to provide your own `libvphysics.{so,dylib,dll}`.
-- Produces `.phy` files that match Valve's stock output field-by-field on well-authored physics meshes. Validated against shipped reference models — per-solid `massCenter`, `upperLimitRadius`, ledgetree node bounds, and compact-surface/ledge layout all agree to four decimals. The only typical deltas are convex-hull triangulation order (akuukka/quickhull vs. Qhull pick different diagonals on coplanar groups) and LOD/drag-axis fields that aren't load-bearing for in-game collision.
-- Implements the IVP wire format correctly: inches→meters scaling, Source→IVP axis remap (`(x,y,z)→(x,-z,y)`, a +90° rotation about X), 16-byte-aligned ledge layout (ledges before tree nodes), volume-weighted centroid via tetrahedral decomposition, and an outlier-vertex filter that drops cross-bone strays.
+- Produces `.phy` files that match Valve's stock output field-by-field on well-authored physics meshes. Validated against shipped reference models — per-solid `massCenter`, `upperLimitRadius`, ledgetree node bounds, and compact-surface/ledge layout all agree to four decimals. Ragdolls collide and settle normally in Source engines.
+- Implements the IVP wire format correctly: inches→meters scaling, Source→IVP axis remap (`(x,y,z)→(x,-z,y)`, a +90° rotation about X), 16-byte-aligned ledge layout (ledges before tree nodes), volume-weighted centroid via tetrahedral decomposition, real per-axis inertia moments, half-edge adjacency with signed-slot `opposite_index`, and ray-cast `pierce_index` for penetration-depth queries.
 - Uses [akuukka/quickhull](https://github.com/akuukka/quickhull) (public domain) for convex hull construction.
 
 The loader (`utils/common/physdll.cpp`) probes per-OS filenames:

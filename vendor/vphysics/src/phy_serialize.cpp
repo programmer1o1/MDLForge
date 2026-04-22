@@ -385,12 +385,20 @@ int32_t SerializeCollide( uint8_t *dst, const CPhysCollide_Impl *c )
 		ledge->nTriangles = static_cast<uint16_t>( nTri );
 		ledge->unknown    = 0;
 
-		// Triangles. Writing opposite_index=0 trades complete contact
-		// walking for stability — IVP's walker and penetration-depth query
-		// assume adjacency and pierce_index are *both* populated; with only
-		// adjacency it loops forever on deep contacts and freezes the game.
-		// The adjacency data is still computed on cv.oppositeEdges so a
-		// future change that also writes pierce_index can switch over.
+		// Triangles + embedded edges.
+		//
+		// `pierce_index` is a plain triangle index identifying the face on
+		// the far side of the hull that a ray from this triangle's
+		// centroid along its inward normal exits through — IVP uses it to
+		// bracket penetration-depth queries.
+		//
+		// `opposite_index` is a *signed 15-bit offset in 4-byte slot
+		// units* from this edge to its twin half-edge in the adjacent
+		// triangle — not a linear table index. The slot indexing treats
+		// each triangle as occupying four 4-byte slots (header + 3
+		// edges): slot(t, e) = 4*t + 1 + e. BuildOppositeEdgeOffsets
+		// precomputes the signed (twin − self) value; we pack it through
+		// PackEdge's 15-bit mask which naturally sign-extends negatives.
 		uint8_t *triBase = ledgeBase + kLedgeSize;
 		for ( size_t t = 0; t < nTri; ++t )
 		{
@@ -398,10 +406,14 @@ int32_t SerializeCollide( uint8_t *dst, const CPhysCollide_Impl *c )
 			const uint16_t i0 = cv.triangles[ t * 3 + 0 ];
 			const uint16_t i1 = cv.triangles[ t * 3 + 1 ];
 			const uint16_t i2 = cv.triangles[ t * 3 + 2 ];
-			tri->triHeader = PackTriHeader( static_cast<uint32_t>( t ), 0, 0, 0 );
-			tri->edges[0].bits = PackEdge( i0, 0, 0 );
-			tri->edges[1].bits = PackEdge( i1, 0, 0 );
-			tri->edges[2].bits = PackEdge( i2, 0, 0 );
+			const int16_t  o0 = cv.oppositeEdges[ t * 3 + 0 ];
+			const int16_t  o1 = cv.oppositeEdges[ t * 3 + 1 ];
+			const int16_t  o2 = cv.oppositeEdges[ t * 3 + 2 ];
+			const uint16_t pierce = cv.pierceIndices[ t ];
+			tri->triHeader = PackTriHeader( static_cast<uint32_t>( t ), pierce, 0, 0 );
+			tri->edges[0].bits = PackEdge( i0, static_cast<uint32_t>( o0 ), 0 );
+			tri->edges[1].bits = PackEdge( i1, static_cast<uint32_t>( o1 ), 0 );
+			tri->edges[2].bits = PackEdge( i2, static_cast<uint32_t>( o2 ), 0 );
 		}
 
 		// Points — padded to 16 bytes (4 floats).
