@@ -6661,6 +6661,139 @@ void Cmd_BoneSaveFrame( )
 }
 
 
+//-----------------------------------------------------------------------------
+// $jigglebone "bone" { is_flexible { ... } is_rigid { ... } has_base_spring { ... } is_boing { ... } }
+// Physics "jiggle" bones simulated by the client (the bone jiggles along its own Z axis).
+// Same syntax and defaults as the Source SDK 2013 studiomdl.
+//-----------------------------------------------------------------------------
+static float JiggleFloat( void )
+{
+	GetToken( false );
+	return verify_atof( token );
+}
+
+static float JiggleAngle( void )
+{
+	return DEG2RAD( JiggleFloat() );
+}
+
+static void ParseJiggleBlock( mstudiojigglebone_t &d, int section )
+{
+	// section: 0 = is_flexible / is_rigid, 1 = has_base_spring, 2 = is_boing
+	GetToken( true );
+	if ( strcmp( token, "{" ) )
+		TokenError( "$jigglebone: expected '{', got \"%s\"\n", token );
+	while ( GetToken( true ) )
+	{
+		if ( !strcmp( token, "}" ) )
+			return;
+		if ( section == 0 )
+		{
+			if ( !stricmp( token, "length" ) )					d.length = JiggleFloat();
+			else if ( !stricmp( token, "tip_mass" ) )			d.tipMass = JiggleFloat();
+			else if ( !stricmp( token, "yaw_stiffness" ) )		d.yawStiffness = JiggleFloat();
+			else if ( !stricmp( token, "yaw_damping" ) )		d.yawDamping = JiggleFloat();
+			else if ( !stricmp( token, "pitch_stiffness" ) )	d.pitchStiffness = JiggleFloat();
+			else if ( !stricmp( token, "pitch_damping" ) )		d.pitchDamping = JiggleFloat();
+			else if ( !stricmp( token, "along_stiffness" ) )	d.alongStiffness = JiggleFloat();
+			else if ( !stricmp( token, "along_damping" ) )		d.alongDamping = JiggleFloat();
+			else if ( !stricmp( token, "allow_length_flex" ) )	d.flags &= ~JIGGLE_HAS_LENGTH_CONSTRAINT;
+			else if ( !stricmp( token, "angle_constraint" ) )	{ d.flags |= JIGGLE_HAS_ANGLE_CONSTRAINT; d.angleLimit = JiggleAngle(); }
+			else if ( !stricmp( token, "yaw_constraint" ) )		{ d.flags |= JIGGLE_HAS_YAW_CONSTRAINT; d.minYaw = JiggleAngle(); d.maxYaw = JiggleAngle(); }
+			else if ( !stricmp( token, "yaw_friction" ) )		d.yawFriction = JiggleFloat();
+			else if ( !stricmp( token, "yaw_bounce" ) )			d.yawBounce = JiggleFloat();
+			else if ( !stricmp( token, "pitch_constraint" ) )	{ d.flags |= JIGGLE_HAS_PITCH_CONSTRAINT; d.minPitch = JiggleAngle(); d.maxPitch = JiggleAngle(); }
+			else if ( !stricmp( token, "pitch_friction" ) )		d.pitchFriction = JiggleFloat();
+			else if ( !stricmp( token, "pitch_bounce" ) )		d.pitchBounce = JiggleFloat();
+			else TokenError( "$jigglebone: unknown option \"%s\"\n", token );
+		}
+		else if ( section == 1 )
+		{
+			if ( !stricmp( token, "stiffness" ) )				d.baseStiffness = JiggleFloat();
+			else if ( !stricmp( token, "damping" ) )			d.baseDamping = JiggleFloat();
+			else if ( !stricmp( token, "base_mass" ) )			d.baseMass = JiggleFloat();
+			else if ( !stricmp( token, "left_constraint" ) )	{ d.baseMinLeft = JiggleFloat(); d.baseMaxLeft = JiggleFloat(); }
+			else if ( !stricmp( token, "left_friction" ) )		d.baseLeftFriction = JiggleFloat();
+			else if ( !stricmp( token, "up_constraint" ) )		{ d.baseMinUp = JiggleFloat(); d.baseMaxUp = JiggleFloat(); }
+			else if ( !stricmp( token, "up_friction" ) )		d.baseUpFriction = JiggleFloat();
+			else if ( !stricmp( token, "forward_constraint" ) )	{ d.baseMinForward = JiggleFloat(); d.baseMaxForward = JiggleFloat(); }
+			else if ( !stricmp( token, "forward_friction" ) )	d.baseForwardFriction = JiggleFloat();
+			else TokenError( "$jigglebone: unknown base spring option \"%s\"\n", token );
+		}
+		else
+		{
+			if ( !stricmp( token, "impact_speed" ) )			d.boingImpactSpeed = JiggleFloat();
+			else if ( !stricmp( token, "impact_angle" ) )		d.boingImpactAngle = cos( JiggleAngle() );
+			else if ( !stricmp( token, "damping_rate" ) )		d.boingDampingRate = JiggleFloat();
+			else if ( !stricmp( token, "frequency" ) )			d.boingFrequency = JiggleFloat();
+			else if ( !stricmp( token, "amplitude" ) )			d.boingAmplitude = JiggleFloat();
+			else TokenError( "$jigglebone: unknown boing option \"%s\"\n", token );
+		}
+	}
+	TokenError( "$jigglebone: unexpected end of file\n" );
+}
+
+void Cmd_JiggleBone( void )
+{
+	if ( g_numjigglebones >= MAXSTUDIOBONES )
+		TokenError( "too many $jigglebone\n" );
+	GetToken( false );
+	s_jigglebone_t &jb = g_jigglebones[g_numjigglebones];
+	memset( &jb, 0, sizeof( jb ) );
+	strcpyn( jb.bonename, token );
+
+	mstudiojigglebone_t &d = jb.data;
+	d.length = 10.0f;
+	d.tipMass = 0.0f;
+	d.yawStiffness = d.pitchStiffness = 100.0f;
+	d.yawDamping = d.pitchDamping = 0.0f;
+	d.alongStiffness = 100.0f;
+	d.alongDamping = 0.0f;
+	d.angleLimit = 0.0f;
+	d.minYaw = d.maxYaw = d.minPitch = d.maxPitch = 0.0f;
+	d.baseMass = 0.0f;
+	d.baseStiffness = 100.0f;
+	d.baseDamping = 0.0f;
+	d.boingImpactSpeed = 100.0f;
+	d.boingImpactAngle = cos( DEG2RAD( 45.0f ) );
+	d.boingDampingRate = 0.25f;
+	d.boingFrequency = 30.0f;
+	d.boingAmplitude = 0.35f;
+
+	GetToken( true );
+	if ( strcmp( token, "{" ) )
+		TokenError( "$jigglebone \"%s\": expected '{'\n", jb.bonename );
+	while ( GetToken( true ) )
+	{
+		if ( !strcmp( token, "}" ) )
+			break;
+		if ( !stricmp( token, "is_flexible" ) )
+		{
+			d.flags |= JIGGLE_IS_FLEXIBLE | JIGGLE_HAS_LENGTH_CONSTRAINT;
+			ParseJiggleBlock( d, 0 );
+		}
+		else if ( !stricmp( token, "is_rigid" ) )
+		{
+			d.flags |= JIGGLE_IS_RIGID | JIGGLE_HAS_LENGTH_CONSTRAINT;
+			ParseJiggleBlock( d, 0 );
+		}
+		else if ( !stricmp( token, "has_base_spring" ) )
+		{
+			d.flags |= JIGGLE_HAS_BASE_SPRING;
+			ParseJiggleBlock( d, 1 );
+		}
+		else if ( !stricmp( token, "is_boing" ) )
+		{
+			d.flags |= JIGGLE_IS_BOING;
+			ParseJiggleBlock( d, 2 );
+		}
+		else
+			TokenError( "$jigglebone \"%s\": unknown section \"%s\"\n", jb.bonename, token );
+	}
+	g_numjigglebones++;
+}
+
+
 //
 // This is the master list of the commands a QC file supports.
 // To add a new command to the QC files, add it here.
@@ -6699,6 +6832,7 @@ struct
 	{ "$weightlist", Cmd_Weightlist },
 	{ "$defaultweightlist", Cmd_DefaultWeightlist },
 	{ "$ikchain", Cmd_IKChain },
+	{ "$jigglebone", Cmd_JiggleBone },
 	{ "$ikautoplaylock", Cmd_IKAutoplayLock },
 	{ "$eyeposition", Cmd_Eyeposition },
 	{ "$illumposition", Cmd_Illumposition },
