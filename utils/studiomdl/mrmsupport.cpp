@@ -663,6 +663,18 @@ void BuildIndividualMeshes( s_source_t *psource )
 		}
 	}
 
+	if ( getenv( "MDLFORGE_DEBUG_MESHES" ) )
+	{
+		for (k = 0; k < MAXSTUDIOSKINS; k++)
+		{
+			if (!psource->mesh[k].numfaces) continue;
+			int bad = 0;
+			for (i = psource->mesh[k].faceoffset; i < psource->mesh[k].numfaces + psource->mesh[k].faceoffset; i++)
+				if ( psource->face[i].a >= (unsigned long)psource->mesh[k].numvertices || psource->face[i].b >= (unsigned long)psource->mesh[k].numvertices || psource->face[i].c >= (unsigned long)psource->mesh[k].numvertices ) bad++;
+			printf( "DEBUG mesh %d: verts %d @%d faces %d @%d  bad faces %d\n", k, psource->mesh[k].numvertices, psource->mesh[k].vertexoffset, psource->mesh[k].numfaces, psource->mesh[k].faceoffset, bad );
+		}
+	}
+
 	CalcModelTangentSpaces( psource );
 }
 

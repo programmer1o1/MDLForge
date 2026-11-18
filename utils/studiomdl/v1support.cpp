@@ -29,22 +29,64 @@
 #include "studiomdl.h"
 
 
+// Exact-match lookup (material, position, texcoord) through a hash table instead of a linear scan
+// over every vertex so far; among the candidates the lowest index whose normal is within
+// normal_blend wins, exactly like the original loop. Makes big SMDs (60k+ triangles) load in
+// seconds instead of minutes.
+#include <unordered_map>
+#include <vector>
+#include <cstring>
+
+static std::unordered_map<uint64_t, std::vector<int> > s_vlistHash;
+static int s_vlistHashCount = 0;
+
+static uint64_t VlistKey( int material, const Vector &v, const Vector2D &t )
+{
+	uint32_t w[6];
+	memcpy( &w[0], &v.x, 4 ); memcpy( &w[1], &v.y, 4 ); memcpy( &w[2], &v.z, 4 );
+	memcpy( &w[3], &t.x, 4 ); memcpy( &w[4], &t.y, 4 ); w[5] = (uint32_t)material;
+	for ( int k = 0; k < 6; k++ ) if ( w[k] == 0x80000000u ) w[k] = 0;	// -0.0 == 0.0
+	uint64_t h = 1469598103934665603ull;
+	for ( int k = 0; k < 6; k++ ) { h ^= w[k]; h *= 1099511628211ull; }
+	return h;
+}
+
 int lookup_index( s_source_t *psource, int material, Vector& vertex, Vector& normal, Vector2D texcoord )
 {
 	int i;
 
-	for (i = 0; i < numvlist; i++) 
+	if ( numvlist == 0 || numvlist < s_vlistHashCount )
 	{
-		if (v_listdata[i].m == material
-			&& DotProduct( g_normal[i], normal ) > normal_blend
-			&& VectorCompare( g_vertex[i], vertex )
-			&& g_texcoord[i][0] == texcoord[0]
-			&& g_texcoord[i][1] == texcoord[1])
+		s_vlistHash.clear();				// new source file
+		s_vlistHashCount = 0;
+	}
+	for ( ; s_vlistHashCount < numvlist; s_vlistHashCount++ )	// entries added elsewhere
+	{
+		int j = s_vlistHashCount;
+		s_vlistHash[ VlistKey( v_listdata[j].m, g_vertex[j], g_texcoord[j] ) ].push_back( j );
+	}
+
+	uint64_t key = VlistKey( material, vertex, texcoord );
+	std::unordered_map<uint64_t, std::vector<int> >::iterator it = s_vlistHash.find( key );
+	if ( it != s_vlistHash.end() )
+	{
+		const std::vector<int> &cand = it->second;
+		for ( size_t c = 0; c < cand.size(); c++ )
 		{
-			v_listdata[i].lastref = numvlist;
-			return i;
+			i = cand[c];
+			if (v_listdata[i].m == material
+				&& DotProduct( g_normal[i], normal ) > normal_blend
+				&& VectorCompare( g_vertex[i], vertex )
+				&& g_texcoord[i][0] == texcoord[0]
+				&& g_texcoord[i][1] == texcoord[1])
+			{
+				v_listdata[i].lastref = numvlist;
+				return i;
+			}
 		}
 	}
+
+	i = numvlist;
 	if (i >= MAXSTUDIOVERTS) {
 		MdlError( "too many indices in source: \"%s\"\n", psource->filename);
 	}
@@ -62,6 +104,8 @@ int lookup_index( s_source_t *psource, int material, Vector& vertex, Vector& nor
 	v_listdata[i].lastref = numvlist;
 
 	numvlist = i + 1;
+	s_vlistHash[ key ].push_back( i );
+	s_vlistHashCount = numvlist;
 	return i;
 }
 
@@ -282,6 +326,9 @@ void Grab_Triangles( s_source_t *psource )
 		texture = lookup_texture( texturename, sizeof( texturename ) );
 		psource->texmap[texture] = texture;	// hack, make it 1:1
 		material = use_texture_as_material( texture );
+
+		if ( g_numfaces >= MAXSTUDIOTRIANGLES )
+			MdlError( "%s: too many triangles (more than %d)\n", psource->filename, MAXSTUDIOTRIANGLES );
 
 		s_face_t f;
 		ParseFaceData( psource, material, &f );

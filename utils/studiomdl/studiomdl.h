@@ -1081,6 +1081,16 @@ EXTERN s_aimatbone_t g_aimatbones[MAXSTUDIOBONES];
 EXTERN int g_aimatbonemap[MAXSTUDIOBONES]; // map used aimatpbone's to source aimatpbone's (may be optimized out)
 
 
+// $jigglebone
+struct s_jigglebone_t
+{
+	char				bonename[MAXSTUDIONAME];
+	mstudiojigglebone_t	data;
+};
+EXTERN int g_numjigglebones;
+EXTERN s_jigglebone_t g_jigglebones[MAXSTUDIOBONES];
+
+
 struct s_forcedhierarchy_t
 {
 	char			parentname[MAXSTUDIONAME];

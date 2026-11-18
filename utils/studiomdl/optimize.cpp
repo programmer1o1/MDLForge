@@ -1762,6 +1762,8 @@ void COptimizedModel::SourceMeshToTriangleList( s_model_t *pSrcModel, s_mesh_t *
 		newTriangle.a = pFace.a;
 		newTriangle.b = pFace.b;
 		newTriangle.c = pFace.c;
+		if ( getenv( "MDLFORGE_DEBUG_MESHES" ) && ( pFace.a >= (unsigned long)pSrcMesh->numvertices || pFace.b >= (unsigned long)pSrcMesh->numvertices || pFace.c >= (unsigned long)pSrcMesh->numvertices ) )
+			printf( "DEBUG optimize: face %d out of mesh range (%lu %lu %lu / %d)\n", i, pFace.a, pFace.b, pFace.c, pSrcMesh->numvertices );
 	}
 }
 

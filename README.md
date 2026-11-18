@@ -106,3 +106,25 @@ Runs four phase tests:
 Disable with `-DMDLFORGE_VPHYSICS_TESTS=OFF`.
 
 A `.phy` dumper lives at `vendor/vphysics/tools/phy_dump.cpp` for inspecting any `.phy` file's structure — useful when diagnosing model loading issues in-game.
+
+## studiomdl changes
+
+- **`$jigglebone`** — physics jiggle bones, same QC syntax and defaults as the Source SDK 2013
+  studiomdl: `is_flexible`, `is_rigid`, `has_base_spring` and `is_boing` blocks (`length`,
+  `tip_mass`, `pitch_/yaw_/along_stiffness` and `_damping`, `angle_constraint`, `yaw_constraint`,
+  `pitch_constraint`, `allow_length_flex`, `base_mass`, `left_/up_/forward_constraint`, …).
+  Written as `mstudiojigglebone_t` (`STUDIO_PROC_JIGGLE`, `BONE_ALWAYS_PROCEDURAL`). Works with
+  `$include`, so a model can keep its jiggle rules in a separate `.qci`.
+- **Models over 32,767 vertices** — the LOD vertex reorder (`write.cpp`) kept each mesh's map into
+  the flattened vertex list as `short`, so every vertex past 32,767 got a wrapped index and the
+  VTX referenced garbage. Meshes after that point rendered as nothing in game. The map is now
+  `int`, and it's built in one pass instead of an O(n²) scan.
+- **Fast SMD loading** — vertex unification (`lookup_index`) uses a hash on (material, position,
+  texcoord) instead of a linear scan over every vertex so far. The output is identical, and a
+  65k-triangle SMD compiles in under 2 minutes instead of about 13.
+- **More source triangles** — `MAXSTUDIOTRIANGLES` raised from 65,536 to 262,144. The SMD loader
+  kept faces in fixed arrays of that size and silently overran them (memory corruption, crash
+  later), and it now stops with a clear error if a model ever exceeds the limit. The engine's real
+  limits (per-mesh vertices/indices, 53 bones per strip) are unaffected.
+- **`MDLFORGE_DEBUG_MESHES=1`** — prints each source mesh's vertex and face ranges and flags any
+  face index outside its mesh.

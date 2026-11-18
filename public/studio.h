@@ -54,7 +54,7 @@ Studio models are position independent, so the cache manager can move them.
 #define STUDIO_VERSION		44
 
 #ifndef _XBOX
-#define MAXSTUDIOTRIANGLES	65536	// TODO: tune this
+#define MAXSTUDIOTRIANGLES	262144	// studiomdl source-triangle capacity (meshes still split by the 16-bit VTX limits)
 #define MAXSTUDIOVERTS		65536	// TODO: tune this
 #define	MAXSTUDIOFLEXVERTS	10000	// max number of verts that can be flexed per mesh.  TODO: tune this
 #else
@@ -89,6 +89,70 @@ struct mstudiodata_t
 #define STUDIO_PROC_QUATINTERP	2
 #define STUDIO_PROC_AIMATBONE	3
 #define STUDIO_PROC_AIMATATTACH 4
+#define STUDIO_PROC_JIGGLE		5
+
+// jiggle bone rules ($jigglebone) - same layout as the Source SDK 2013 engine reads
+#define JIGGLE_IS_FLEXIBLE				0x01
+#define JIGGLE_IS_RIGID					0x02
+#define JIGGLE_HAS_YAW_CONSTRAINT		0x04
+#define JIGGLE_HAS_PITCH_CONSTRAINT		0x08
+#define JIGGLE_HAS_ANGLE_CONSTRAINT		0x10
+#define JIGGLE_HAS_LENGTH_CONSTRAINT	0x20
+#define JIGGLE_HAS_BASE_SPRING			0x40
+#define JIGGLE_IS_BOING					0x80
+
+struct mstudiojigglebone_t
+{
+	int				flags;
+
+	// general params
+	float			length;					// how far from bone base, along bone (Z), is tip
+	float			tipMass;
+
+	// flexible params
+	float			yawStiffness;
+	float			yawDamping;
+	float			pitchStiffness;
+	float			pitchDamping;
+	float			alongStiffness;
+	float			alongDamping;
+
+	// angle constraint
+	float			angleLimit;				// maximum deflection of tip in radians
+
+	// yaw constraint
+	float			minYaw;					// in radians
+	float			maxYaw;					// in radians
+	float			yawFriction;
+	float			yawBounce;
+
+	// pitch constraint
+	float			minPitch;				// in radians
+	float			maxPitch;				// in radians
+	float			pitchFriction;
+	float			pitchBounce;
+
+	// base spring
+	float			baseMass;
+	float			baseStiffness;
+	float			baseDamping;
+	float			baseMinLeft;
+	float			baseMaxLeft;
+	float			baseLeftFriction;
+	float			baseMinUp;
+	float			baseMaxUp;
+	float			baseUpFriction;
+	float			baseMinForward;
+	float			baseMaxForward;
+	float			baseForwardFriction;
+
+	// boing
+	float			boingImpactSpeed;
+	float			boingImpactAngle;
+	float			boingDampingRate;
+	float			boingFrequency;
+	float			boingAmplitude;
+};
 
 struct mstudioaxisinterpbone_t
 {
